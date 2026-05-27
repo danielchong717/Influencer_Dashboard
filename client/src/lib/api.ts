@@ -1,0 +1,66 @@
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: '/api',
+  headers: { 'Content-Type': 'application/json' },
+});
+
+// Auth
+export const getGmailAuthUrl = () => api.get<{ url: string }>('/auth/gmail/url');
+export const getGmailStatus = () => api.get<{ connected: boolean; member: any }>('/auth/gmail/status');
+export const disconnectGmail = () => api.delete('/auth/gmail');
+export const getTeamMembers = () => api.get<any[]>('/auth/team-members');
+
+// Campaigns
+export const getCampaigns = () => api.get<any[]>('/campaigns');
+
+// Influencers
+export const getInfluencers = (params?: Record<string, string>) => api.get<any[]>('/influencers', { params });
+export const createInfluencer = (data: any) => api.post('/influencers', data);
+export const updateInfluencer = (id: string, data: any) => api.put(`/influencers/${id}`, data);
+export const deleteInfluencer = (id: string) => api.delete(`/influencers/${id}`);
+
+// Outreach
+export const getOutreach = (params?: Record<string, string>) => api.get<any[]>('/outreach', { params });
+export const getOutreachAnalytics = (params?: Record<string, string>) => api.get<any>('/outreach/analytics', { params });
+export const getFollowUps = () => api.get<any[]>('/outreach/follow-ups');
+export const sendOutreachEmails = (data: any) => api.post('/outreach/send', data);
+export const updateOutreachStatus = (id: string, status: string) => api.put(`/outreach/${id}/status`, { status });
+export const sendFollowUp = (id: string) => api.post(`/outreach/${id}/follow-up`);
+export const getEmailTemplates = () => api.get<any[]>('/outreach/templates');
+export const createEmailTemplate = (data: any) => api.post('/outreach/templates', data);
+
+// Pipeline
+export const getPipeline = (params?: Record<string, string>) => api.get<any>('/pipeline', { params });
+export const getPipelineStats = (params?: Record<string, string>) => api.get<any[]>('/pipeline/stats', { params });
+export const updatePipelineStage = (id: string, stage: string) => api.put(`/pipeline/${id}/stage`, { stage });
+export const updatePublicationDate = (id: string, date: string) => api.put(`/pipeline/${id}/date`, { publication_date: date });
+export const createPipelineCard = (data: any) => api.post('/pipeline', data);
+export const deletePipelineCard = (id: string) => api.delete(`/pipeline/${id}`);
+
+// Content
+export const getContent = (params?: Record<string, string>) => api.get<any[]>('/content', { params });
+export const createContent = (data: any) => api.post('/content', data);
+export const updateVideoLink = (id: string, url: string) => api.put(`/content/${id}/video`, { video_url: url });
+export const fetchMetrics = (id: string) => api.post(`/content/${id}/fetch-metrics`);
+
+// Payment
+export const getPayments = (params?: Record<string, string>) => api.get<any[]>('/payment', { params });
+export const getPaymentOverview = (params?: Record<string, string>) => api.get<any>('/payment/overview', { params });
+export const updatePaymentStatus = (id: string, status: string) => api.put(`/payment/${id}/status`, { status });
+export const createPayment = (data: any) => api.post('/payment', data);
+
+// Report
+export const getReportOverview = (params?: Record<string, string>) => api.get<any>('/report/overview', { params });
+export const getReportRanking = (params?: Record<string, string>) => api.get<any[]>('/report/ranking', { params });
+export const getReportTimeline = (params?: Record<string, string>) => api.get<any[]>('/report/timeline', { params });
+export const getReportTakeaways = (params?: Record<string, string>) => api.get<any>('/report/takeaways', { params });
+export const getProfileBreakdown = (params?: Record<string, string>) => api.get<any[]>('/report/profile-breakdown', { params });
+
+// Long-term
+export const getLongTermPartners = () => api.get<any[]>('/longterm');
+export const signLongTermPartner = (data: any) => api.post('/longterm', data);
+export const updateLongTermPartner = (id: string, data: any) => api.put(`/longterm/${id}`, data);
+export const deleteLongTermPartner = (id: string) => api.delete(`/longterm/${id}`);
+
+export default api;
