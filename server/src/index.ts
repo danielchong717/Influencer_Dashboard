@@ -13,6 +13,7 @@ import contentRoutes from './routes/content';
 import paymentRoutes from './routes/payment';
 import reportRoutes from './routes/report';
 import longtermRoutes from './routes/longterm';
+import trackRoutes from './routes/track';
 
 import db from './db';
 import seed from './db/seed';
@@ -36,6 +37,7 @@ app.use('/api/content', contentRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/longterm', longtermRoutes);
+app.use('/api/track', trackRoutes);
 
 app.get('/api/campaigns', (req, res) => {
   const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all();

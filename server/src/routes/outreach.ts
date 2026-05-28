@@ -98,26 +98,32 @@ router.post('/send', async (req, res) => {
                .replace(/\{\{sender_name\}\}/g, sender?.name || 'Our Team');
     body = body.replace(/\n/g, '<br>');
 
-    let emailSent = false;
-    if (connected && influencer.email) {
-      emailSent = await sendEmail({ to: influencer.email, subject, body, teamMemberId: team_member_id });
-    }
-
     const now = new Date().toISOString();
     const followUpDate = follow_up_days
       ? new Date(Date.now() + follow_up_days * 86400000).toISOString().split('T')[0]
       : null;
 
+    // Resolve outreach ID upfront (existing or new) so it can be embedded in the tracking pixel URL
     const existing = db.prepare('SELECT id FROM outreach WHERE influencer_id = ? AND campaign_id = ?').get(influencerId, campaign_id) as any;
+    const outreachId = existing?.id || uuidv4();
+
+    // Tracking pixel URL — only works when SERVER_URL is set to a public address in .env
+    const serverUrl = (process.env.SERVER_URL || '').replace(/\/$/, '');
+    const trackingPixelUrl = serverUrl ? `${serverUrl}/api/track/open/${outreachId}` : undefined;
+
+    let emailSent = false;
+    if (connected && influencer.email) {
+      emailSent = await sendEmail({ to: influencer.email, subject, body, teamMemberId: team_member_id, trackingPixelUrl });
+    }
+
     if (existing) {
       db.prepare(`UPDATE outreach SET status='sent', sent_at=?, follow_up_date=?, follow_up_sent=0, email_template_id=?, team_member_id=? WHERE id=?`)
         .run(now, followUpDate, template_id, team_member_id, existing.id);
       results.push({ influencer_id: influencerId, outreach_id: existing.id, email_sent: emailSent });
     } else {
-      const id = uuidv4();
       db.prepare(`INSERT INTO outreach (id, influencer_id, campaign_id, team_member_id, status, email_template_id, sent_at, follow_up_date) VALUES (?, ?, ?, ?, 'sent', ?, ?, ?)`)
-        .run(id, influencerId, campaign_id, team_member_id, template_id, now, followUpDate);
-      results.push({ influencer_id: influencerId, outreach_id: id, email_sent: emailSent });
+        .run(outreachId, influencerId, campaign_id, team_member_id, template_id, now, followUpDate);
+      results.push({ influencer_id: influencerId, outreach_id: outreachId, email_sent: emailSent });
     }
   }
 

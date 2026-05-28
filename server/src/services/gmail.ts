@@ -79,10 +79,17 @@ export const sendEmail = async (params: {
   subject: string;
   body: string;
   teamMemberId?: string;
+  trackingPixelUrl?: string;
 }): Promise<boolean> => {
   try {
     const gmail = await getGmailClient(params.teamMemberId);
     if (!gmail) throw new Error('Gmail not connected');
+
+    // Append tracking pixel at the very end of the email body if a URL is provided.
+    // When the influencer's email client loads this image, the server marks the email as opened.
+    const bodyWithPixel = params.trackingPixelUrl
+      ? `${params.body}<img src="${params.trackingPixelUrl}" width="1" height="1" style="display:none;border:0;outline:none;" alt="" />`
+      : params.body;
 
     const encodedSubject = `=?UTF-8?B?${Buffer.from(params.subject).toString('base64')}?=`;
     const message = [
@@ -92,7 +99,7 @@ export const sendEmail = async (params: {
       `Content-Type: text/html; charset=utf-8`,
       `Content-Transfer-Encoding: quoted-printable`,
       ``,
-      params.body,
+      bodyWithPixel,
     ].join('\n');
 
     const encodedMessage = Buffer.from(message).toString('base64url');
