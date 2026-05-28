@@ -6,9 +6,12 @@ const api = axios.create({
 });
 
 // Auth
-export const getGmailAuthUrl = () => api.get<{ url: string }>('/auth/gmail/url');
-export const getGmailStatus = () => api.get<{ connected: boolean; member: any }>('/auth/gmail/status');
-export const disconnectGmail = () => api.delete('/auth/gmail');
+export const getGmailAuthUrl = (teamMemberId?: string) =>
+  api.get<{ url: string }>('/auth/gmail/url', { params: teamMemberId ? { team_member_id: teamMemberId } : {} });
+export const getGmailStatus = () =>
+  api.get<{ connected: boolean; member: any; connectedMembers: { id: string; name: string; email: string }[] }>('/auth/gmail/status');
+export const disconnectGmail = (teamMemberId?: string) =>
+  api.delete('/auth/gmail', { params: teamMemberId ? { team_member_id: teamMemberId } : {} });
 export const getTeamMembers = () => api.get<any[]>('/auth/team-members');
 
 // Campaigns

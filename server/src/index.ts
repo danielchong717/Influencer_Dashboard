@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
 import authRoutes from './routes/auth';
 import influencerRoutes from './routes/influencers';
 import outreachRoutes from './routes/outreach';

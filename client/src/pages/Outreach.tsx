@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Send, RefreshCw, Mail, Eye, MessageSquare, Check, ChevronDown, X, Clock, Users } from 'lucide-react';
-import { getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus, getEmailTemplates, getFollowUps, sendFollowUp } from '../lib/api';
+import { Send, RefreshCw, Mail, Eye, MessageSquare, Check, X, Clock, Plus, Wifi, WifiOff } from 'lucide-react';
+import { getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus, getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, getGmailAuthUrl, disconnectGmail, getGmailStatus } from '../lib/api';
 import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
+
+const PLATFORMS = ['TikTok', 'YouTube', 'Instagram', 'RedNote'];
+const BLANK_INF = { name: '', platform: 'TikTok', username: '', email: '', followers: '', category: '', country: '' };
 
 const STATUS_ORDER = ['pending', 'sent', 'opened', 'replied', 'confirmed'];
 
@@ -15,7 +18,11 @@ export default function Outreach() {
   const [followUps, setFollowUps] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [connectedMemberIds, setConnectedMemberIds] = useState<Set<string>>(new Set());
   const [showSendModal, setShowSendModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState(BLANK_INF);
+  const [addLoading, setAddLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterMember, setFilterMember] = useState('');
   const [sendForm, setSendForm] = useState({ template_id: '', follow_up_days: 1, team_member_id: '' });
@@ -26,19 +33,32 @@ export default function Outreach() {
     if (filterStatus) params.status = filterStatus;
     if (filterMember) params.team_member_id = filterMember;
 
-    const [r, a, t, f] = await Promise.all([
+    const [r, a, t, f, gs] = await Promise.all([
       getOutreach(params),
       getOutreachAnalytics(activeCampaign ? { campaign_id: activeCampaign.id } : {}),
       getEmailTemplates(),
       getFollowUps(),
+      getGmailStatus(),
     ]);
     setRecords(r.data);
     setAnalytics(a.data);
     setTemplates(t.data);
     setFollowUps(f.data);
+    setConnectedMemberIds(new Set((gs.data.connectedMembers || []).map((m: any) => m.id)));
     if (t.data.length > 0 && !sendForm.template_id) {
       setSendForm(f => ({ ...f, template_id: t.data[0].id }));
     }
+  };
+
+  const handleConnectGmail = async (memberId: string) => {
+    const res = await getGmailAuthUrl(memberId);
+    window.location.href = res.data.url;
+  };
+
+  const handleDisconnectGmail = async (memberId: string) => {
+    await disconnectGmail(memberId);
+    showToast('Gmail disconnected', 'info');
+    load();
   };
 
   useEffect(() => { load(); }, [activeCampaign, filterStatus, filterMember]);
@@ -78,6 +98,20 @@ export default function Outreach() {
       load();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddInfluencer = async () => {
+    if (!addForm.name || !addForm.platform) return showToast('Name and platform are required', 'error');
+    setAddLoading(true);
+    try {
+      await createInfluencer({ ...addForm, followers: Number(addForm.followers) || 0 });
+      showToast(`${addForm.name} added!`, 'success');
+      setAddForm(BLANK_INF);
+      setShowAddModal(false);
+      load();
+    } finally {
+      setAddLoading(false);
     }
   };
 
@@ -122,16 +156,46 @@ export default function Outreach() {
         <div className="card p-4">
           <div className="text-sm font-semibold text-slate-700 mb-3">Team Performance</div>
           <div className="grid grid-cols-3 gap-3">
-            {members.map((m: any) => (
-              <div key={m.id} className="bg-slate-50 rounded-lg p-3">
-                <div className="font-medium text-sm text-slate-800">{m.name}</div>
-                <div className="mt-1.5 flex gap-3 text-xs text-slate-500">
-                  <span><span className="font-semibold text-slate-700">{m.total_sent}</span> sent</span>
-                  <span><span className="font-semibold text-slate-700">{m.total_opened}</span> opened</span>
-                  <span><span className="font-semibold text-green-600">{m.total_confirmed}</span> confirmed</span>
+            {members.map((m: any) => {
+              const isConnected = connectedMemberIds.has(m.id);
+              return (
+                <div key={m.id} className="bg-slate-50 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="font-medium text-sm text-slate-800">{m.name}</div>
+                    <div className="flex items-center gap-1.5">
+                      {isConnected ? (
+                        <>
+                          <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
+                            <Wifi size={11} /> Gmail
+                          </span>
+                          <button
+                            onClick={() => handleDisconnectGmail(m.id)}
+                            title="Disconnect Gmail"
+                            className="text-slate-400 hover:text-red-500 transition-colors"
+                          >
+                            <WifiOff size={11} />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => handleConnectGmail(m.id)}
+                          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                          title={`Connect ${m.email} to Gmail`}
+                        >
+                          <WifiOff size={11} /> Connect
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-400 mb-1.5">{m.email}</div>
+                  <div className="flex gap-3 text-xs text-slate-500">
+                    <span><span className="font-semibold text-slate-700">{m.total_sent}</span> sent</span>
+                    <span><span className="font-semibold text-slate-700">{m.total_opened}</span> opened</span>
+                    <span><span className="font-semibold text-green-600">{m.total_confirmed}</span> confirmed</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -176,6 +240,9 @@ export default function Outreach() {
               <option value="">All Members</option>
               {members.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
+            <button onClick={() => setShowAddModal(true)} className="btn-secondary flex items-center gap-1.5">
+              <Plus size={14} /> Add Influencer
+            </button>
             <button
               onClick={() => { if (selected.size > 0) setShowSendModal(true); else showToast('Select influencers first', 'info'); }}
               className="btn-primary flex items-center gap-1.5"
@@ -251,6 +318,61 @@ export default function Outreach() {
         </table>
       </div>
 
+      {/* Add Influencer Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-900">Add Influencer</h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Name *</label>
+                <input className="input" placeholder="e.g. G Loh" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Platform *</label>
+                  <select className="select w-full" value={addForm.platform} onChange={e => setAddForm(f => ({ ...f, platform: e.target.value }))}>
+                    {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                  <input className="input" placeholder="@handle" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <input className="input" type="email" placeholder="influencer@gmail.com" value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Followers</label>
+                  <input className="input" type="number" placeholder="0" value={addForm.followers} onChange={e => setAddForm(f => ({ ...f, followers: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+                  <input className="input" placeholder="e.g. Lifestyle" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                <input className="input" placeholder="e.g. US" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
+              <button onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleAddInfluencer} disabled={addLoading} className="btn-primary flex items-center gap-2">
+                {addLoading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+                Add Influencer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Send Modal */}
       {showSendModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -270,8 +392,20 @@ export default function Outreach() {
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Sender (Team Member)</label>
                 <select className="select" value={sendForm.team_member_id} onChange={e => setSendForm(f => ({ ...f, team_member_id: e.target.value }))}>
                   <option value="">Auto (first connected account)</option>
-                  {members.map((m: any) => <option key={m.id} value={m.id}>{m.name} — {m.email || 'No email'}</option>)}
+                  {members.map((m: any) => {
+                    const isConn = connectedMemberIds.has(m.id);
+                    return (
+                      <option key={m.id} value={m.id}>
+                        {isConn ? '✓ ' : '✗ '}{m.name} — {m.email || 'No email'}{!isConn ? ' (Gmail not connected)' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+                {sendForm.team_member_id && !connectedMemberIds.has(sendForm.team_member_id) && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    This member's Gmail is not connected — email will not send. Connect their Gmail in Team Performance above.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Auto Follow-up (days after sending)</label>

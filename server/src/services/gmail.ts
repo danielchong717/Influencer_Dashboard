@@ -1,9 +1,9 @@
 import { google } from 'googleapis';
-import nodemailer from 'nodemailer';
 import db from '../db';
 import dotenv from 'dotenv';
+import path from 'path';
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -11,7 +11,7 @@ const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/a
 
 export const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 
-export const getAuthUrl = (): string => {
+export const getAuthUrl = (teamMemberId?: string): string => {
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: [
@@ -20,23 +20,40 @@ export const getAuthUrl = (): string => {
       'https://mail.google.com/',
     ],
     prompt: 'consent',
+    // Pass the team member ID through OAuth state so the callback knows who is connecting
+    ...(teamMemberId ? { state: teamMemberId } : {}),
   });
 };
 
-export const exchangeCodeForTokens = async (code: string, teamMemberId: string) => {
+export const exchangeCodeForTokens = async (code: string, fallbackTeamMemberId: string) => {
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
+
+  // Get the actual Gmail address that was just authorized
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+  const profile = await gmail.users.getProfile({ userId: 'me' });
+  const actualEmail = profile.data.emailAddress || '';
+
+  // Store the token under the team member whose email matches the authorized Google account.
+  // This prevents mismatches when the browser is logged in as a different Google account.
+  const matchingMember = db.prepare('SELECT id FROM team_members WHERE email = ?').get(actualEmail) as any;
+  const targetMemberId = matchingMember?.id || fallbackTeamMemberId;
+
+  // Clear any stale token that was previously stored under this email's owner
+  if (matchingMember?.id && matchingMember.id !== fallbackTeamMemberId) {
+    // If the fallback ID had a token for a different account, only clear it if we're moving it
+    db.prepare(`UPDATE team_members SET gmail_refresh_token = NULL, gmail_access_token = NULL, gmail_token_expiry = NULL WHERE id = ?`)
+      .run(fallbackTeamMemberId);
+  }
 
   db.prepare(`UPDATE team_members SET gmail_refresh_token = ?, gmail_access_token = ?, gmail_token_expiry = ? WHERE id = ?`).run(
     tokens.refresh_token || null,
     tokens.access_token || null,
     tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-    teamMemberId
+    targetMemberId
   );
 
-  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-  const profile = await gmail.users.getProfile({ userId: 'me' });
-  return { email: profile.data.emailAddress, tokens };
+  return { email: actualEmail, tokens, teamMemberId: targetMemberId };
 };
 
 export const getGmailClient = async (teamMemberId?: string) => {
@@ -67,11 +84,13 @@ export const sendEmail = async (params: {
     const gmail = await getGmailClient(params.teamMemberId);
     if (!gmail) throw new Error('Gmail not connected');
 
+    const encodedSubject = `=?UTF-8?B?${Buffer.from(params.subject).toString('base64')}?=`;
     const message = [
       `To: ${params.to}`,
-      `Subject: ${params.subject}`,
-      `Content-Type: text/html; charset=utf-8`,
+      `Subject: ${encodedSubject}`,
       `MIME-Version: 1.0`,
+      `Content-Type: text/html; charset=utf-8`,
+      `Content-Transfer-Encoding: quoted-printable`,
       ``,
       params.body,
     ].join('\n');
@@ -109,4 +128,8 @@ export const sendPaymentConfirmation = async (params: {
 export const isGmailConnected = (): boolean => {
   const member = db.prepare('SELECT id FROM team_members WHERE gmail_refresh_token IS NOT NULL LIMIT 1').get();
   return !!member;
+};
+
+export const getConnectedMembers = (): { id: string; name: string; email: string }[] => {
+  return db.prepare('SELECT id, name, email FROM team_members WHERE gmail_refresh_token IS NOT NULL').all() as any[];
 };
