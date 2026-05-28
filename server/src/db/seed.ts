@@ -27,23 +27,26 @@ const seed = () => {
   db.prepare(`INSERT INTO email_templates (id, name, subject, body) VALUES (?, ?, ?, ?)`).run(
     templateId,
     'Initial Outreach',
-    'Collaboration Opportunity with [Brand Name]',
+    'Collaboration Opportunity with Ji Bei Chuan',
     `Hi {{name}},
 
-I hope this message finds you well! I'm reaching out from [Brand Name] because we've been following your content on {{platform}} and absolutely love what you create.
+I hope this message finds you well! My name is {{sender_name}} from Ji Bei Chuan, an authentic rice noodle restaurant known for our rich broths, hand-crafted noodles, and a wide variety of traditional dishes made with fresh, bold flavors.
 
-We'd love to explore a potential collaboration with you for our upcoming campaign. We think your audience would genuinely connect with our product.
+We've been following your content on {{platform}} and think you'd be an amazing fit for a collaboration with us. We're looking to work with passionate creators to shoot promotional videos and photos that capture the real Ji Bei Chuan experience: the food, the atmosphere, the story.
 
-Here's what we're offering:
-- Competitive compensation based on your rates
-- Full creative freedom
-- Long-term partnership potential
+Here's what we have in mind:
+- A complimentary dining experience at Ji Bei Chuan
+- Creative freedom to shoot content in your own style
+- Promotional videos and/or photos showcasing our restaurant and dishes
+- Fair compensation for your time and content
 
-Would you be open to a quick chat to discuss the details? Looking forward to hearing from you!
+Whether it's a food reel, a restaurant vlog, or stunning food photography, we're open to whatever fits your style best. We'd love to have you come in, enjoy the food, and let your audience discover Ji Bei Chuan through your lens.
+
+Would you be open to visiting us and creating something together? Looking forward to hearing from you!
 
 Best regards,
 {{sender_name}}
-[Brand Name] Marketing Team`
+Ji Bei Chuan Marketing Team`
   );
 
   console.log('Database seeded successfully!');

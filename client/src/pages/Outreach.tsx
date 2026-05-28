@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Send, RefreshCw, Mail, Eye, MessageSquare, Check, X, Clock, Plus, Wifi, WifiOff } from 'lucide-react';
-import { getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus, getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, getGmailAuthUrl, disconnectGmail, getGmailStatus } from '../lib/api';
+import { Send, RefreshCw, Mail, Eye, MessageSquare, Check, X, Clock, Plus, Wifi, WifiOff, Pencil } from 'lucide-react';
+import { getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus, getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, getGmailAuthUrl, disconnectGmail, getGmailStatus, updateEmailTemplate } from '../lib/api';
 import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
@@ -21,6 +21,8 @@ export default function Outreach() {
   const [connectedMemberIds, setConnectedMemberIds] = useState<Set<string>>(new Set());
   const [showSendModal, setShowSendModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
+  const [templateSaving, setTemplateSaving] = useState(false);
   const [addForm, setAddForm] = useState(BLANK_INF);
   const [addLoading, setAddLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
@@ -59,6 +61,23 @@ export default function Outreach() {
     await disconnectGmail(memberId);
     showToast('Gmail disconnected', 'info');
     load();
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!editingTemplate) return;
+    setTemplateSaving(true);
+    try {
+      await updateEmailTemplate(editingTemplate.id, {
+        name: editingTemplate.name,
+        subject: editingTemplate.subject,
+        body: editingTemplate.body,
+      });
+      showToast('Template saved', 'success');
+      setEditingTemplate(null);
+      load();
+    } finally {
+      setTemplateSaving(false);
+    }
   };
 
   useEffect(() => { load(); }, [activeCampaign, filterStatus, filterMember]);
@@ -373,6 +392,45 @@ export default function Outreach() {
         </div>
       )}
 
+      {/* Template Editor Modal */}
+      {editingTemplate && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
+              <h3 className="font-semibold text-slate-900">Edit Template</h3>
+              <button onClick={() => setEditingTemplate(null)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Template Name</label>
+                <input className="input" value={editingTemplate.name}
+                  onChange={e => setEditingTemplate((t: any) => ({ ...t, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Subject Line</label>
+                <input className="input" value={editingTemplate.subject}
+                  onChange={e => setEditingTemplate((t: any) => ({ ...t, subject: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Body
+                  <span className="ml-2 text-xs font-normal text-slate-400">Use {'{{name}}'}, {'{{platform}}'}, {'{{sender_name}}'}</span>
+                </label>
+                <textarea className="input font-mono text-sm" rows={16} value={editingTemplate.body}
+                  onChange={e => setEditingTemplate((t: any) => ({ ...t, body: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100 shrink-0">
+              <button onClick={() => setEditingTemplate(null)} className="btn-secondary">Cancel</button>
+              <button onClick={handleSaveTemplate} disabled={templateSaving} className="btn-primary flex items-center gap-2">
+                {templateSaving ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                Save Template
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Send Modal */}
       {showSendModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -384,9 +442,23 @@ export default function Outreach() {
             <div className="p-5 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Email Template</label>
-                <select className="select" value={sendForm.template_id} onChange={e => setSendForm(f => ({ ...f, template_id: e.target.value }))}>
-                  {templates.map(t => <option key={t.id} value={t.id}>{t.name} — {t.subject}</option>)}
-                </select>
+                <div className="flex gap-2">
+                  <select className="select flex-1" value={sendForm.template_id} onChange={e => setSendForm(f => ({ ...f, template_id: e.target.value }))}>
+                    {templates.map(t => <option key={t.id} value={t.id}>{t.name} — {t.subject}</option>)}
+                  </select>
+                  {sendForm.template_id && (
+                    <button
+                      onClick={() => {
+                        const t = templates.find(t => t.id === sendForm.template_id);
+                        if (t) { setEditingTemplate({ ...t }); setShowSendModal(false); }
+                      }}
+                      className="btn-secondary px-3 flex items-center gap-1.5 shrink-0"
+                      title="Edit template"
+                    >
+                      <Pencil size={14} /> Edit
+                    </button>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Sender (Team Member)</label>

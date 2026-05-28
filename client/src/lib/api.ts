@@ -32,6 +32,8 @@ export const updateOutreachStatus = (id: string, status: string) => api.put(`/ou
 export const sendFollowUp = (id: string) => api.post(`/outreach/${id}/follow-up`);
 export const getEmailTemplates = () => api.get<any[]>('/outreach/templates');
 export const createEmailTemplate = (data: any) => api.post('/outreach/templates', data);
+export const updateEmailTemplate = (id: string, data: any) => api.put(`/outreach/templates/${id}`, data);
+export const deleteEmailTemplate = (id: string) => api.delete(`/outreach/templates/${id}`);
 
 // Pipeline
 export const getPipeline = (params?: Record<string, string>) => api.get<any>('/pipeline', { params });

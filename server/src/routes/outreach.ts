@@ -174,4 +174,16 @@ router.post('/templates', (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM email_templates WHERE id = ?').get(id));
 });
 
+router.put('/templates/:id', (req, res) => {
+  const { name, subject, body } = req.body;
+  db.prepare('UPDATE email_templates SET name = ?, subject = ?, body = ? WHERE id = ?')
+    .run(name, subject, body, req.params.id);
+  res.json(db.prepare('SELECT * FROM email_templates WHERE id = ?').get(req.params.id));
+});
+
+router.delete('/templates/:id', (req, res) => {
+  db.prepare('DELETE FROM email_templates WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
 export default router;
