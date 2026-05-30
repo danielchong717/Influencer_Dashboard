@@ -133,15 +133,37 @@ router.post('/send', async (req, res) => {
 router.put('/:id/status', (req, res) => {
   const { status } = req.body;
   const now = new Date().toISOString();
-  const updates: any = { status };
-  if (status === 'opened' && !db.prepare('SELECT opened_at FROM outreach WHERE id=?').get(req.params.id)) {
-    updates.opened_at = now;
-  }
-  if (status === 'replied') updates.replied_at = now;
 
   db.prepare(`UPDATE outreach SET status=?, opened_at=COALESCE(opened_at,?), replied_at=COALESCE(replied_at,?) WHERE id=?`)
     .run(status, status === 'opened' || status === 'replied' ? now : null, status === 'replied' ? now : null, req.params.id);
-  res.json({ success: true });
+
+  // When an influencer is confirmed, automatically create a Pipeline card so
+  // the team can immediately start tracking content without any manual steps.
+  let pipeline_created = false;
+  if (status === 'confirmed') {
+    const outreach = db.prepare('SELECT * FROM outreach WHERE id = ?').get(req.params.id) as any;
+    if (outreach) {
+      const existing = db.prepare(
+        'SELECT id FROM pipeline WHERE influencer_id = ? AND campaign_id = ?'
+      ).get(outreach.influencer_id, outreach.campaign_id);
+
+      if (!existing) {
+        const pipelineId = uuidv4();
+        const maxPos = (db.prepare(
+          'SELECT MAX(position) as pos FROM pipeline WHERE campaign_id = ?'
+        ).get(outreach.campaign_id) as any)?.pos || 0;
+
+        db.prepare(`
+          INSERT INTO pipeline (id, influencer_id, campaign_id, team_member_id, stage, position)
+          VALUES (?, ?, ?, ?, 'confirmed', ?)
+        `).run(pipelineId, outreach.influencer_id, outreach.campaign_id, outreach.team_member_id, maxPos + 1);
+
+        pipeline_created = true;
+      }
+    }
+  }
+
+  res.json({ success: true, pipeline_created });
 });
 
 router.post('/:id/follow-up', async (req, res) => {

@@ -141,7 +141,10 @@ export default function Outreach() {
   };
 
   const handleStatusChange = async (id: string, status: string) => {
-    await updateOutreachStatus(id, status);
+    const res = await updateOutreachStatus(id, status);
+    if (res.data.pipeline_created) {
+      showToast('Influencer confirmed — added to Pipeline automatically', 'success');
+    }
     load();
   };
 
