@@ -161,11 +161,11 @@ influencers.forEach((inf, idx) => {
 
 // ── Content schedule (all 5 published with YouTube links + metrics) ───────
 const content = [
-  { inf: influencers[0], videoUrl: 'https://www.youtube.com/watch?v=fJdVw_xnT0c', views24: 4800,  views7d: 5200,  likes: 310,  comments: 28, shares: 14, engagement: 6.8, price: 1500 },
-  { inf: influencers[1], videoUrl: 'https://www.youtube.com/watch?v=dWHugRFW6R8', views24: 5100,  views7d: 5600,  likes: 290,  comments: 31, shares: 12, engagement: 6.0, price: 2800 },
-  { inf: influencers[2], videoUrl: 'https://www.youtube.com/watch?v=d-YTlCbBMgs', views24: 4500,  views7d: 4900,  likes: 380,  comments: 44, shares: 18, engagement: 8.9, price: 3500 },
-  { inf: influencers[3], videoUrl: 'https://www.youtube.com/watch?v=ci-5DdE6dw8', views24: 5800,  views7d: 6100,  likes: 210,  comments: 19, shares: 9,  engagement: 3.9, price: 1200 },
-  { inf: influencers[4], videoUrl: 'https://www.youtube.com/watch?v=l4UjsJVOcSM', views24: 4200,  views7d: 4700,  likes: 260,  comments: 22, shares: 11, engagement: 6.2, price: 2200 },
+  { inf: influencers[0], videoUrl: 'https://www.youtube.com/watch?v=wdNfnYctBPM', views24: 4800,  views7d: 5363,  likes: 310,  comments: 28, shares: 14, engagement: 6.8, price: 1500 },
+  { inf: influencers[1], videoUrl: 'https://www.youtube.com/watch?v=xjF744CvoS4', views24: 3900,  views7d: 4517,  likes: 290,  comments: 31, shares: 12, engagement: 6.0, price: 2800 },
+  { inf: influencers[2], videoUrl: 'https://www.youtube.com/watch?v=Jnw6AnyAHTo', views24: 8200,  views7d: 9620,  likes: 380,  comments: 44, shares: 18, engagement: 4.6, price: 3500 },
+  { inf: influencers[3], videoUrl: 'https://www.youtube.com/watch?v=9Di38-NLk4o', views24: 2100,  views7d: 2445,  likes: 210,  comments: 19, shares: 9,  engagement: 9.7, price: 1200 },
+  { inf: influencers[4], videoUrl: 'https://www.youtube.com/watch?v=k78vPX0Uf-I', views24: 2200,  views7d: 2561,  likes: 260,  comments: 22, shares: 11, engagement: 11.4, price: 2200 },
 ];
 content.forEach((c, idx) => {
   const schedDate = new Date(now.getTime() - (14 - idx * 3) * 86400000).toISOString().split('T')[0];
