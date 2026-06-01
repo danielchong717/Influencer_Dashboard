@@ -16,6 +16,9 @@ export const getTeamMembers = () => api.get<any[]>('/auth/team-members');
 
 // Campaigns
 export const getCampaigns = () => api.get<any[]>('/campaigns');
+export const createCampaign = (data: any) => api.post('/campaigns', data);
+export const updateCampaign = (id: string, data: any) => api.put(`/campaigns/${id}`, data);
+export const deleteCampaign = (id: string) => api.delete(`/campaigns/${id}`);
 
 // Influencers
 export const getInfluencers = (params?: Record<string, string>) => api.get<any[]>('/influencers', { params });
@@ -48,6 +51,7 @@ export const getContent = (params?: Record<string, string>) => api.get<any[]>('/
 export const createContent = (data: any) => api.post('/content', data);
 export const updateVideoLink = (id: string, url: string) => api.put(`/content/${id}/video`, { video_url: url });
 export const fetchMetrics = (id: string) => api.post(`/content/${id}/fetch-metrics`);
+export const updateMetricsManual = (id: string, data: any) => api.put(`/content/${id}/metrics`, data);
 
 // Payment
 export const getPayments = (params?: Record<string, string>) => api.get<any[]>('/payment', { params });

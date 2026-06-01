@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Send, RefreshCw, Mail, Eye, MessageSquare, Check, X, Clock, Plus, Wifi, WifiOff, Pencil } from 'lucide-react';
-import { getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus, getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, getGmailAuthUrl, disconnectGmail, getGmailStatus, updateEmailTemplate } from '../lib/api';
+import { Send, RefreshCw, Mail, Eye, MessageSquare, Check, X, Clock, Plus, Wifi, WifiOff, Pencil, Trash2 } from 'lucide-react';
+import { getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus, getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, updateInfluencer, deleteInfluencer, getGmailAuthUrl, disconnectGmail, getGmailStatus, updateEmailTemplate } from '../lib/api';
 import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
@@ -21,6 +21,9 @@ export default function Outreach() {
   const [connectedMemberIds, setConnectedMemberIds] = useState<Set<string>>(new Set());
   const [showSendModal, setShowSendModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingInfluencer, setEditingInfluencer] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState(BLANK_INF);
+  const [editLoading, setEditLoading] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [addForm, setAddForm] = useState(BLANK_INF);
@@ -60,6 +63,39 @@ export default function Outreach() {
   const handleDisconnectGmail = async (memberId: string) => {
     await disconnectGmail(memberId);
     showToast('Gmail disconnected', 'info');
+    load();
+  };
+
+  const openEditInfluencer = (r: OutreachRecord) => {
+    setEditingInfluencer(r);
+    setEditForm({
+      name: r.influencer_name,
+      platform: r.platform,
+      username: r.username || '',
+      email: r.influencer_email || '',
+      followers: String(r.followers || ''),
+      category: (r as any).category || '',
+      country: (r as any).country || '',
+    });
+  };
+
+  const handleEditInfluencer = async () => {
+    if (!editingInfluencer) return;
+    setEditLoading(true);
+    try {
+      await updateInfluencer(editingInfluencer.influencer_id, { ...editForm, followers: Number(editForm.followers) || 0 });
+      showToast('Influencer updated', 'success');
+      setEditingInfluencer(null);
+      load();
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleDeleteInfluencer = async (influencerId: string, name: string) => {
+    if (!window.confirm(`Remove ${name} from the dashboard? This also deletes their outreach records.`)) return;
+    await deleteInfluencer(influencerId);
+    showToast(`${name} removed`, 'info');
     load();
   };
 
@@ -327,9 +363,17 @@ export default function Outreach() {
                   ) : '—'}
                 </td>
                 <td className="table-cell">
-                  <button onClick={() => handleFollowUp(r.id)} className="text-xs text-blue-600 hover:underline">
-                    Follow up
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleFollowUp(r.id)} className="text-xs text-blue-600 hover:underline">
+                      Follow up
+                    </button>
+                    <button onClick={() => openEditInfluencer(r)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors" title="Edit influencer">
+                      <Pencil size={13} />
+                    </button>
+                    <button onClick={() => handleDeleteInfluencer(r.influencer_id, r.influencer_name)} className="p-1 text-slate-300 hover:text-red-500 transition-colors" title="Remove influencer">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -339,6 +383,61 @@ export default function Outreach() {
           </tbody>
         </table>
       </div>
+
+      {/* Edit Influencer Modal */}
+      {editingInfluencer && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-900">Edit Influencer</h3>
+              <button onClick={() => setEditingInfluencer(null)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Name *</label>
+                <input className="input" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Platform *</label>
+                  <select className="select w-full" value={editForm.platform} onChange={e => setEditForm(f => ({ ...f, platform: e.target.value }))}>
+                    {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                  <input className="input" placeholder="@handle" value={editForm.username} onChange={e => setEditForm(f => ({ ...f, username: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <input className="input" type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Followers</label>
+                  <input className="input" type="number" value={editForm.followers} onChange={e => setEditForm(f => ({ ...f, followers: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+                  <input className="input" value={editForm.category} onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                <input className="input" value={editForm.country} onChange={e => setEditForm(f => ({ ...f, country: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
+              <button onClick={() => setEditingInfluencer(null)} className="btn-secondary">Cancel</button>
+              <button onClick={handleEditInfluencer} disabled={editLoading} className="btn-primary flex items-center gap-2">
+                {editLoading ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Influencer Modal */}
       {showAddModal && (

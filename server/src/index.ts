@@ -14,6 +14,7 @@ import paymentRoutes from './routes/payment';
 import reportRoutes from './routes/report';
 import longtermRoutes from './routes/longterm';
 import trackRoutes from './routes/track';
+import campaignRoutes from './routes/campaigns';
 
 import db from './db';
 import seed from './db/seed';
@@ -38,11 +39,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/longterm', longtermRoutes);
 app.use('/api/track', trackRoutes);
-
-app.get('/api/campaigns', (req, res) => {
-  const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all();
-  res.json(campaigns);
-});
+app.use('/api/campaigns', campaignRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

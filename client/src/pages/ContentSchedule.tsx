@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Link, RefreshCw, Eye, Heart, MessageCircle, Share2, X, Check, ExternalLink } from 'lucide-react';
-import { getContent, updateVideoLink, fetchMetrics } from '../lib/api';
+import { Link, RefreshCw, Eye, Heart, MessageCircle, Share2, X, Check, ExternalLink, ClipboardEdit } from 'lucide-react';
+import { getContent, updateVideoLink, fetchMetrics, updateMetricsManual } from '../lib/api';
 import { useAppStore } from '../store';
 import { formatNumber, formatDate, formatCurrency, getPlatformColor, getPlatformIcon, getStatusColor } from '../lib/utils';
 import type { ContentItem } from '../types';
+
+const BLANK_METRICS = { views_24h: '', views_7d: '', likes: '', comments: '', shares: '' };
 
 export default function ContentSchedule() {
   const { activeCampaign, showToast } = useAppStore();
@@ -12,6 +14,9 @@ export default function ContentSchedule() {
   const [videoModal, setVideoModal] = useState<ContentItem | null>(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [fetchingId, setFetchingId] = useState<string | null>(null);
+  const [metricsModal, setMetricsModal] = useState<ContentItem | null>(null);
+  const [metricsForm, setMetricsForm] = useState(BLANK_METRICS);
+  const [metricsSaving, setMetricsSaving] = useState(false);
 
   const load = async () => {
     const params: Record<string, string> = {};
@@ -26,24 +31,63 @@ export default function ContentSchedule() {
     if (!videoModal || !videoUrl) return;
     setLoading(true);
     try {
-      await updateVideoLink(videoModal.id, videoUrl);
-      showToast('Video link saved. Metrics will auto-populate shortly.', 'success');
+      const res = await updateVideoLink(videoModal.id, videoUrl);
+      const isYouTube = videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be');
+      const source = (res.data as any)?.source;
+      showToast(
+        isYouTube && source === 'youtube'
+          ? 'YouTube metrics fetched in real-time'
+          : 'Video saved. For non-YouTube platforms, use Enter Metrics to add stats manually.',
+        'success'
+      );
       setVideoModal(null);
       setVideoUrl('');
-      setTimeout(load, 1500);
+      setTimeout(load, 1200);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleFetchMetrics = async (id: string) => {
-    setFetchingId(id);
+  const handleFetchMetrics = async (item: ContentItem) => {
+    const isYouTube = (item.video_url || '').includes('youtube.com') || (item.video_url || '').includes('youtu.be');
+    if (!isYouTube) {
+      // Non-YouTube: open manual entry instead
+      setMetricsModal(item);
+      setMetricsForm({
+        views_24h: String(item.views_24h || ''),
+        views_7d: String(item.views_7d || ''),
+        likes: String(item.likes || ''),
+        comments: String(item.comments || ''),
+        shares: String((item as any).shares || ''),
+      });
+      return;
+    }
+    setFetchingId(item.id);
     try {
-      await fetchMetrics(id);
-      showToast('Metrics updated', 'success');
+      await fetchMetrics(item.id);
+      showToast('YouTube metrics refreshed', 'success');
       load();
     } finally {
       setFetchingId(null);
+    }
+  };
+
+  const handleSaveManualMetrics = async () => {
+    if (!metricsModal) return;
+    setMetricsSaving(true);
+    try {
+      await updateMetricsManual(metricsModal.id, {
+        views_24h: Number(metricsForm.views_24h) || 0,
+        views_7d: Number(metricsForm.views_7d) || 0,
+        likes: Number(metricsForm.likes) || 0,
+        comments: Number(metricsForm.comments) || 0,
+        shares: Number(metricsForm.shares) || 0,
+      });
+      showToast('Metrics saved', 'success');
+      setMetricsModal(null);
+      load();
+    } finally {
+      setMetricsSaving(false);
     }
   };
 
@@ -77,7 +121,7 @@ export default function ContentSchedule() {
       <div className="card overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <span className="text-sm font-semibold text-slate-700">Content Delivery ({items.length})</span>
-          <span className="text-xs text-slate-400">Metrics auto-populate after video link is added</span>
+          <span className="text-xs text-slate-400">YouTube metrics auto-fetch. TikTok/Instagram/RedNote: enter manually.</span>
         </div>
 
         <table className="w-full">
@@ -89,91 +133,85 @@ export default function ContentSchedule() {
               <th className="table-header">Status</th>
               <th className="table-header">Price</th>
               <th className="table-header">Video Link</th>
-              <th className="table-header">
-                <div className="flex items-center gap-1"><Eye size={12} /> 24h Views</div>
-              </th>
-              <th className="table-header">
-                <div className="flex items-center gap-1"><Eye size={12} /> 7d Views</div>
-              </th>
-              <th className="table-header">
-                <div className="flex items-center gap-1"><Heart size={12} /> Likes</div>
-              </th>
+              <th className="table-header"><div className="flex items-center gap-1"><Eye size={12} /> 24h Views</div></th>
+              <th className="table-header"><div className="flex items-center gap-1"><Eye size={12} /> 7d Views</div></th>
+              <th className="table-header"><div className="flex items-center gap-1"><Heart size={12} /> Likes</div></th>
               <th className="table-header">Engagement</th>
               <th className="table-header">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {items.map(item => (
-              <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                <td className="table-cell whitespace-nowrap">
-                  <div className="font-medium text-slate-800 text-xs">{formatDate(item.scheduled_date)}</div>
-                </td>
-                <td className="table-cell">
-                  <div className="font-medium text-slate-900">{item.influencer_name}</div>
-                  <div className="text-xs text-slate-400">{item.username}</div>
-                </td>
-                <td className="table-cell">
-                  <span className={`badge ${getPlatformColor(item.platform)}`}>
-                    {getPlatformIcon(item.platform)} {item.platform}
-                  </span>
-                </td>
-                <td className="table-cell">
-                  <span className={`badge ${getStatusColor(item.status)}`}>
-                    {item.status === 'published' ? '✓ Published' : '⏳ Scheduled'}
-                  </span>
-                </td>
-                <td className="table-cell text-slate-600">{formatCurrency(item.price)}</td>
-                <td className="table-cell">
-                  {item.video_url ? (
-                    <a href={item.video_url} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-blue-600 hover:underline text-xs">
-                      <ExternalLink size={11} /> View
-                    </a>
-                  ) : (
-                    <button
-                      onClick={() => { setVideoModal(item); setVideoUrl(''); }}
-                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 transition-colors border border-dashed border-slate-300 hover:border-blue-400 px-2 py-1 rounded"
-                    >
-                      <Link size={11} /> Add link
-                    </button>
-                  )}
-                </td>
-                <td className="table-cell">
-                  {item.views_24h != null ? (
-                    <span className="font-medium text-slate-800">{formatNumber(item.views_24h)}</span>
-                  ) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="table-cell">
-                  {item.views_7d != null ? (
-                    <span className="font-medium text-slate-800">{formatNumber(item.views_7d)}</span>
-                  ) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="table-cell">
-                  {item.likes != null ? (
-                    <span className="text-slate-600">{formatNumber(item.likes)}</span>
-                  ) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="table-cell">
-                  {item.engagement_rate != null ? (
-                    <span className={`font-medium ${item.engagement_rate > 5 ? 'text-green-600' : 'text-slate-600'}`}>
-                      {item.engagement_rate.toFixed(1)}%
+            {items.map(item => {
+              const isYouTube = (item.video_url || '').includes('youtube.com') || (item.video_url || '').includes('youtu.be');
+              return (
+                <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="table-cell whitespace-nowrap">
+                    <div className="font-medium text-slate-800 text-xs">{formatDate(item.scheduled_date)}</div>
+                  </td>
+                  <td className="table-cell">
+                    <div className="font-medium text-slate-900">{item.influencer_name}</div>
+                    <div className="text-xs text-slate-400">{item.username}</div>
+                  </td>
+                  <td className="table-cell">
+                    <span className={`badge ${getPlatformColor(item.platform)}`}>
+                      {getPlatformIcon(item.platform)} {item.platform}
                     </span>
-                  ) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="table-cell">
-                  {item.video_url && (
-                    <button
-                      onClick={() => handleFetchMetrics(item.id)}
-                      disabled={fetchingId === item.id}
-                      className="text-xs text-blue-600 hover:underline flex items-center gap-1"
-                    >
-                      {fetchingId === item.id ? <RefreshCw size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                      Refresh
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="table-cell">
+                    <span className={`badge ${getStatusColor(item.status)}`}>
+                      {item.status === 'published' ? '✓ Published' : '⏳ Scheduled'}
+                    </span>
+                  </td>
+                  <td className="table-cell text-slate-600">{formatCurrency(item.price)}</td>
+                  <td className="table-cell">
+                    {item.video_url ? (
+                      <a href={item.video_url} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-blue-600 hover:underline text-xs">
+                        <ExternalLink size={11} /> View
+                      </a>
+                    ) : (
+                      <button
+                        onClick={() => { setVideoModal(item); setVideoUrl(''); }}
+                        className="flex items-center gap-1 text-xs text-slate-400 hover:text-blue-600 transition-colors border border-dashed border-slate-300 hover:border-blue-400 px-2 py-1 rounded"
+                      >
+                        <Link size={11} /> Add link
+                      </button>
+                    )}
+                  </td>
+                  <td className="table-cell">
+                    {item.views_24h != null ? <span className="font-medium text-slate-800">{formatNumber(item.views_24h)}</span> : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="table-cell">
+                    {item.views_7d != null ? <span className="font-medium text-slate-800">{formatNumber(item.views_7d)}</span> : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="table-cell">
+                    {item.likes != null ? <span className="text-slate-600">{formatNumber(item.likes)}</span> : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="table-cell">
+                    {item.engagement_rate != null ? (
+                      <span className={`font-medium ${item.engagement_rate > 5 ? 'text-green-600' : 'text-slate-600'}`}>
+                        {item.engagement_rate.toFixed(1)}%
+                      </span>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="table-cell">
+                    {item.video_url && (
+                      <button
+                        onClick={() => handleFetchMetrics(item)}
+                        disabled={fetchingId === item.id}
+                        title={isYouTube ? 'Refresh YouTube metrics' : 'Enter metrics manually'}
+                        className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                      >
+                        {fetchingId === item.id
+                          ? <RefreshCw size={11} className="animate-spin" />
+                          : isYouTube ? <RefreshCw size={11} /> : <ClipboardEdit size={11} />}
+                        {isYouTube ? 'Refresh' : 'Enter Metrics'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
             {items.length === 0 && (
               <tr><td colSpan={11} className="text-center py-12 text-slate-400 text-sm">No content scheduled yet</td></tr>
             )}
@@ -198,14 +236,11 @@ export default function ContentSchedule() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Video URL</label>
-                <input
-                  type="url"
-                  className="input"
-                  placeholder="https://www.tiktok.com/@username/video/..."
-                  value={videoUrl}
-                  onChange={e => setVideoUrl(e.target.value)}
-                />
-                <p className="text-xs text-slate-400 mt-1">Once saved, metrics will be auto-fetched in the background.</p>
+                <input type="url" className="input" placeholder="https://www.youtube.com/watch?v=... or TikTok/Instagram link"
+                  value={videoUrl} onChange={e => setVideoUrl(e.target.value)} />
+                <p className="text-xs text-slate-400 mt-1">
+                  YouTube links auto-fetch real metrics. For TikTok, Instagram, and RedNote, use the Enter Metrics button after saving.
+                </p>
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
@@ -213,6 +248,61 @@ export default function ContentSchedule() {
               <button onClick={handleAddVideo} disabled={loading || !videoUrl} className="btn-primary flex items-center gap-2">
                 {loading ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
                 Save & Fetch Metrics
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Metrics Entry Modal */}
+      {metricsModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div>
+                <h3 className="font-semibold text-slate-900">Enter Metrics</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{metricsModal.influencer_name} · {metricsModal.platform}</p>
+              </div>
+              <button onClick={() => setMetricsModal(null)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-slate-500 bg-slate-50 rounded-lg p-3">
+                Copy the numbers directly from your {metricsModal.platform} analytics dashboard and paste them here.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Views (24h)</label>
+                  <input className="input" type="number" min="0" placeholder="0" value={metricsForm.views_24h}
+                    onChange={e => setMetricsForm(f => ({ ...f, views_24h: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Views (7d)</label>
+                  <input className="input" type="number" min="0" placeholder="0" value={metricsForm.views_7d}
+                    onChange={e => setMetricsForm(f => ({ ...f, views_7d: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Likes</label>
+                  <input className="input" type="number" min="0" placeholder="0" value={metricsForm.likes}
+                    onChange={e => setMetricsForm(f => ({ ...f, likes: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Comments</label>
+                  <input className="input" type="number" min="0" placeholder="0" value={metricsForm.comments}
+                    onChange={e => setMetricsForm(f => ({ ...f, comments: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Shares</label>
+                  <input className="input" type="number" min="0" placeholder="0" value={metricsForm.shares}
+                    onChange={e => setMetricsForm(f => ({ ...f, shares: e.target.value }))} />
+                </div>
+              </div>
+              <p className="text-xs text-slate-400">Engagement rate is calculated automatically from the values above.</p>
+            </div>
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
+              <button onClick={() => setMetricsModal(null)} className="btn-secondary">Cancel</button>
+              <button onClick={handleSaveManualMetrics} disabled={metricsSaving} className="btn-primary flex items-center gap-2">
+                {metricsSaving ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                Save Metrics
               </button>
             </div>
           </div>
