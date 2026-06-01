@@ -12,7 +12,7 @@ router.get('/', (req, res) => {
   let query = `
     SELECT
       i.id as influencer_id, i.name as influencer_name, i.platform, i.email as influencer_email,
-      i.username, i.followers,
+      i.username, i.followers, i.category, i.country,
       o.id, o.campaign_id, o.team_member_id, o.status, o.email_template_id,
       o.sent_at, o.opened_at, o.replied_at, o.follow_up_date, o.follow_up_sent, o.notes, o.created_at,
       COALESCE(tm.name, '—') as team_member_name,
@@ -131,11 +131,28 @@ router.post('/send', async (req, res) => {
 });
 
 router.put('/:id/status', (req, res) => {
-  const { status } = req.body;
+  const { status, influencer_id, campaign_id } = req.body;
   const now = new Date().toISOString();
+  let outreachId = req.params.id;
+
+  // If no real outreach record exists yet (influencer added but no email sent),
+  // create one on the fly so status changes and downstream automation work.
+  if (outreachId === 'null' || outreachId === 'undefined' || !outreachId) {
+    const existing = influencer_id && campaign_id
+      ? db.prepare('SELECT id FROM outreach WHERE influencer_id = ? AND campaign_id = ?').get(influencer_id, campaign_id) as any
+      : null;
+    if (existing) {
+      outreachId = existing.id;
+    } else if (influencer_id && campaign_id) {
+      const firstMember = db.prepare('SELECT id FROM team_members LIMIT 1').get() as any;
+      outreachId = uuidv4();
+      db.prepare(`INSERT INTO outreach (id, influencer_id, campaign_id, team_member_id, status) VALUES (?, ?, ?, ?, 'pending')`)
+        .run(outreachId, influencer_id, campaign_id, firstMember?.id || '');
+    }
+  }
 
   db.prepare(`UPDATE outreach SET status=?, opened_at=COALESCE(opened_at,?), replied_at=COALESCE(replied_at,?) WHERE id=?`)
-    .run(status, status === 'opened' || status === 'replied' ? now : null, status === 'replied' ? now : null, req.params.id);
+    .run(status, status === 'opened' || status === 'replied' ? now : null, status === 'replied' ? now : null, outreachId);
 
   // When an influencer is confirmed, automatically create a Pipeline card so
   // the team can immediately start tracking content without any manual steps.
@@ -159,6 +176,20 @@ router.put('/:id/status', (req, res) => {
         `).run(pipelineId, outreach.influencer_id, outreach.campaign_id, outreach.team_member_id, maxPos + 1);
 
         pipeline_created = true;
+      }
+
+      // Also auto-create a Content Schedule entry if one doesn't exist yet
+      const existingContent = db.prepare(
+        'SELECT id FROM content_schedule WHERE influencer_id = ? AND campaign_id = ?'
+      ).get(outreach.influencer_id, outreach.campaign_id);
+
+      if (!existingContent) {
+        const influencer = db.prepare('SELECT * FROM influencers WHERE id = ?').get(outreach.influencer_id) as any;
+        const scheduledDate = new Date().toISOString().split('T')[0];
+        db.prepare(`
+          INSERT INTO content_schedule (id, influencer_id, campaign_id, scheduled_date, platform, content_type, status, price)
+          VALUES (?, ?, ?, ?, ?, 'video', 'scheduled', 0)
+        `).run(uuidv4(), outreach.influencer_id, outreach.campaign_id, scheduledDate, influencer?.platform || 'TikTok');
       }
     }
   }

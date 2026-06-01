@@ -5,8 +5,8 @@ import { useAppStore } from '../store';
 import { formatCurrency, formatDate, getPlatformColor, getPlatformIcon } from '../lib/utils';
 import type { Payment, PaymentOverview } from '../types';
 
-const CURRENCIES = ['MYR', 'USD', 'SGD', 'GBP', 'EUR'];
-const BLANK_FORM = { influencer_id: '', amount: '', currency: 'MYR', payment_method: '' };
+const CURRENCIES = ['USD', 'SGD', 'GBP', 'EUR'];
+const BLANK_FORM = { influencer_id: '', amount: '', currency: 'USD', payment_method: '' };
 
 export default function PaymentPage() {
   const { activeCampaign, showToast } = useAppStore();

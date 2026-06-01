@@ -39,7 +39,14 @@ router.put('/:id', (req, res) => {
 });
 
 router.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM influencers WHERE id = ?').run(req.params.id);
+  const id = req.params.id;
+  // Delete all related records first to avoid FK constraint errors
+  db.prepare('DELETE FROM outreach WHERE influencer_id = ?').run(id);
+  db.prepare('DELETE FROM pipeline WHERE influencer_id = ?').run(id);
+  db.prepare('DELETE FROM content_schedule WHERE influencer_id = ?').run(id);
+  db.prepare('DELETE FROM payments WHERE influencer_id = ?').run(id);
+  db.prepare('DELETE FROM long_term_partners WHERE influencer_id = ?').run(id);
+  db.prepare('DELETE FROM influencers WHERE id = ?').run(id);
   res.json({ success: true });
 });
 

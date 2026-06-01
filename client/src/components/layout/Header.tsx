@@ -188,7 +188,7 @@ export default function Header() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Budget (MYR)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Budget (USD)</label>
                   <input className="input" type="number" min="0" placeholder="0" value={campaignForm.budget}
                     onChange={e => setCampaignForm(f => ({ ...f, budget: e.target.value }))} />
                 </div>

@@ -87,6 +87,8 @@ export default function Outreach() {
       showToast('Influencer updated', 'success');
       setEditingInfluencer(null);
       load();
+    } catch (err) {
+      showToast('Failed to update influencer', 'error');
     } finally {
       setEditLoading(false);
     }
@@ -94,9 +96,13 @@ export default function Outreach() {
 
   const handleDeleteInfluencer = async (influencerId: string, name: string) => {
     if (!window.confirm(`Remove ${name} from the dashboard? This also deletes their outreach records.`)) return;
-    await deleteInfluencer(influencerId);
-    showToast(`${name} removed`, 'info');
-    load();
+    try {
+      await deleteInfluencer(influencerId);
+      showToast(`${name} removed`, 'info');
+      await load();
+    } catch {
+      showToast('Failed to delete influencer', 'error');
+    }
   };
 
   const handleSaveTemplate = async () => {
@@ -176,10 +182,10 @@ export default function Outreach() {
     load();
   };
 
-  const handleStatusChange = async (id: string, status: string) => {
-    const res = await updateOutreachStatus(id, status);
+  const handleStatusChange = async (id: string, status: string, influencerId: string, campaignId?: string) => {
+    const res = await updateOutreachStatus(id, status, influencerId, campaignId);
     if (res.data.pipeline_created) {
-      showToast('Influencer confirmed — added to Pipeline automatically', 'success');
+      showToast('Influencer confirmed — added to Pipeline & Content Schedule', 'success');
     }
     load();
   };
@@ -347,7 +353,7 @@ export default function Outreach() {
                 <td className="table-cell">
                   <select
                     value={r.status}
-                    onChange={e => handleStatusChange(r.id, e.target.value)}
+                    onChange={e => handleStatusChange(r.id, e.target.value, r.influencer_id, activeCampaign?.id)}
                     className={`badge border-0 cursor-pointer text-xs font-medium ${getStatusColor(r.status)}`}
                   >
                     {STATUS_ORDER.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}

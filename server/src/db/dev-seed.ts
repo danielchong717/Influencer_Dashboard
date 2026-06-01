@@ -80,7 +80,7 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY, influencer_id TEXT NOT NULL, campaign_id TEXT NOT NULL,
-    amount REAL NOT NULL, currency TEXT DEFAULT 'MYR', status TEXT DEFAULT 'pending',
+    amount REAL NOT NULL, currency TEXT DEFAULT 'USD', status TEXT DEFAULT 'pending',
     payment_method TEXT, payment_date TEXT, confirmation_sent INTEGER DEFAULT 0,
     notes TEXT, created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (influencer_id) REFERENCES influencers(id),
@@ -124,11 +124,11 @@ db.prepare('INSERT INTO email_templates (id, name, subject, body) VALUES (?, ?, 
 
 // ── Influencers ────────────────────────────────────────────────────────────
 const influencers = [
-  { id: uuidv4(), name: 'G Loh',        platform: 'TikTok',    username: '@gordonloh712',  email: 'danielchonggoonhin@gmail.com', followers: 82000,  category: 'Food', country: 'MY' },
-  { id: uuidv4(), name: 'Sarah Tan',    platform: 'Instagram', username: '@sarahtan_eats', email: 'sarah@example.com',            followers: 145000, category: 'Lifestyle', country: 'MY' },
-  { id: uuidv4(), name: 'KL Foodie',    platform: 'YouTube',   username: 'KLFoodieCh',     email: 'klfoodie@example.com',         followers: 310000, category: 'Food', country: 'MY' },
-  { id: uuidv4(), name: 'Mei Zhen',     platform: 'RedNote',   username: '@meizhen_food',  email: 'meizhen@example.com',          followers: 56000,  category: 'Food', country: 'MY' },
-  { id: uuidv4(), name: 'Aaron Lim',    platform: 'TikTok',    username: '@aaronlimkl',    email: 'aaron@example.com',            followers: 220000, category: 'Lifestyle', country: 'MY' },
+  { id: uuidv4(), name: 'G Loh',        platform: 'TikTok',    username: '@gordonloh712',  email: 'testinfluencer01@gmail.com',  followers: 82000,  category: 'Food',      country: 'MY' },
+  { id: uuidv4(), name: 'Sarah Tan',    platform: 'Instagram', username: '@sarahtan_eats', email: 'testinfluencer02@gmail.com',  followers: 145000, category: 'Lifestyle', country: 'MY' },
+  { id: uuidv4(), name: 'KL Foodie',    platform: 'YouTube',   username: 'KLFoodieCh',     email: 'testinfluencer03@gmail.com',  followers: 310000, category: 'Food',      country: 'MY' },
+  { id: uuidv4(), name: 'Mei Zhen',     platform: 'RedNote',   username: '@meizhen_food',  email: 'testinfluencer04@gmail.com',  followers: 56000,  category: 'Food',      country: 'MY' },
+  { id: uuidv4(), name: 'Aaron Lim',    platform: 'TikTok',    username: '@aaronlimkl',    email: 'testinfluencer05@gmail.com',  followers: 220000, category: 'Lifestyle', country: 'MY' },
 ];
 const ins = db.prepare('INSERT INTO influencers (id, name, platform, username, email, followers, category, country) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
 influencers.forEach(i => ins.run(i.id, i.name, i.platform, i.username, i.email, i.followers, i.category, i.country));
@@ -151,38 +151,41 @@ influencers.forEach((inf, idx) => {
     .run(outreachId, inf.id, campaignId, members[idx], status, templateId, sentAt, openedAt, repliedAt, followUpDate);
 });
 
-// ── Pipeline cards (for confirmed influencers) ────────────────────────────
-const pipelineStages = ['creating_video', 'brief_sent', 'scheduled'];
-[influencers[0], influencers[1], influencers[2]].forEach((inf, idx) => {
-  const pubDate = new Date(now.getTime() + (7 + idx * 7) * 86400000).toISOString().split('T')[0];
+// ── Pipeline cards (all 5 influencers across different stages) ───────────
+const pipelineStages = ['creating_video', 'brief_sent', 'scheduled', 'confirmed', 'confirmed'];
+influencers.forEach((inf, idx) => {
+  const pubDate = new Date(now.getTime() + (7 + idx * 5) * 86400000).toISOString().split('T')[0];
   db.prepare('INSERT INTO pipeline (id, influencer_id, campaign_id, team_member_id, stage, publication_date, position) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(uuidv4(), inf.id, campaignId, members[idx], pipelineStages[idx], pubDate, idx + 1);
+    .run(uuidv4(), inf.id, campaignId, members[idx % members.length], pipelineStages[idx], pubDate, idx + 1);
 });
 
-// ── Content schedule ──────────────────────────────────────────────────────
+// ── Content schedule (all 5 published with YouTube links + metrics) ───────
 const content = [
-  { inf: influencers[0], status: 'published', views24: 45200,  views7d: 112000, likes: 3200, comments: 180, shares: 95,  engagement: 3.1 },
-  { inf: influencers[1], status: 'published', views24: 88000,  views7d: 240000, likes: 7100, comments: 420, shares: 210, engagement: 3.2 },
-  { inf: influencers[2], status: 'scheduled', views24: null,   views7d: null,   likes: null, comments: null,shares: null,engagement: null },
+  { inf: influencers[0], videoUrl: 'https://www.youtube.com/watch?v=fJdVw_xnT0c', views24: 4800,  views7d: 5200,  likes: 310,  comments: 28, shares: 14, engagement: 6.8, price: 1500 },
+  { inf: influencers[1], videoUrl: 'https://www.youtube.com/watch?v=dWHugRFW6R8', views24: 5100,  views7d: 5600,  likes: 290,  comments: 31, shares: 12, engagement: 6.0, price: 2800 },
+  { inf: influencers[2], videoUrl: 'https://www.youtube.com/watch?v=d-YTlCbBMgs', views24: 4500,  views7d: 4900,  likes: 380,  comments: 44, shares: 18, engagement: 8.9, price: 3500 },
+  { inf: influencers[3], videoUrl: 'https://www.youtube.com/watch?v=ci-5DdE6dw8', views24: 5800,  views7d: 6100,  likes: 210,  comments: 19, shares: 9,  engagement: 3.9, price: 1200 },
+  { inf: influencers[4], videoUrl: 'https://www.youtube.com/watch?v=l4UjsJVOcSM', views24: 4200,  views7d: 4700,  likes: 260,  comments: 22, shares: 11, engagement: 6.2, price: 2200 },
 ];
 content.forEach((c, idx) => {
-  const schedDate = new Date(now.getTime() - (10 - idx * 5) * 86400000).toISOString().split('T')[0];
-  db.prepare(`INSERT INTO content_schedule (id, influencer_id, campaign_id, scheduled_date, platform, content_type, status, views_24h, views_7d, likes, comments, shares, engagement_rate, price, published_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(uuidv4(), c.inf.id, campaignId, schedDate, c.inf.platform, 'video', c.status,
-      c.views24, c.views7d, c.likes, c.comments, c.shares, c.engagement, 1500,
-      c.status === 'published' ? schedDate : null);
+  const schedDate = new Date(now.getTime() - (14 - idx * 3) * 86400000).toISOString().split('T')[0];
+  db.prepare(`INSERT INTO content_schedule (id, influencer_id, campaign_id, scheduled_date, platform, content_type, video_url, status, views_24h, views_7d, likes, comments, shares, engagement_rate, price, published_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(uuidv4(), c.inf.id, campaignId, schedDate, c.inf.platform, 'video', c.videoUrl, 'published',
+      c.views24, c.views7d, c.likes, c.comments, c.shares, c.engagement, c.price, schedDate);
 });
 
 // ── Payments ───────────────────────────────────────────────────────────────
 const payments = [
   { inf: influencers[0], amount: 1500, status: 'paid',    date: new Date(now.getTime() - 3 * 86400000).toISOString() },
-  { inf: influencers[1], amount: 2800, status: 'pending', date: null },
+  { inf: influencers[1], amount: 2800, status: 'paid',    date: new Date(now.getTime() - 1 * 86400000).toISOString() },
   { inf: influencers[2], amount: 3500, status: 'pending', date: null },
+  { inf: influencers[3], amount: 1200, status: 'pending', date: null },
+  { inf: influencers[4], amount: 2200, status: 'pending', date: null },
 ];
 payments.forEach(p => {
   db.prepare('INSERT INTO payments (id, influencer_id, campaign_id, amount, currency, status, payment_date, confirmation_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(uuidv4(), p.inf.id, campaignId, p.amount, 'MYR', p.status, p.date, p.status === 'paid' ? 1 : 0);
+    .run(uuidv4(), p.inf.id, campaignId, p.amount, 'USD', p.status, p.date, p.status === 'paid' ? 1 : 0);
 });
 
 db.close();

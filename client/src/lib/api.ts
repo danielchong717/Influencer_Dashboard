@@ -31,7 +31,7 @@ export const getOutreach = (params?: Record<string, string>) => api.get<any[]>('
 export const getOutreachAnalytics = (params?: Record<string, string>) => api.get<any>('/outreach/analytics', { params });
 export const getFollowUps = () => api.get<any[]>('/outreach/follow-ups');
 export const sendOutreachEmails = (data: any) => api.post('/outreach/send', data);
-export const updateOutreachStatus = (id: string, status: string) => api.put(`/outreach/${id}/status`, { status });
+export const updateOutreachStatus = (id: string, status: string, influencer_id?: string, campaign_id?: string) => api.put(`/outreach/${id}/status`, { status, influencer_id, campaign_id });
 export const sendFollowUp = (id: string) => api.post(`/outreach/${id}/follow-up`);
 export const getEmailTemplates = () => api.get<any[]>('/outreach/templates');
 export const createEmailTemplate = (data: any) => api.post('/outreach/templates', data);

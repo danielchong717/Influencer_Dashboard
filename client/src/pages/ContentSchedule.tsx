@@ -107,7 +107,7 @@ export default function ContentSchedule() {
         {[
           { label: 'Published', value: published.length, color: 'text-green-600', bg: 'bg-green-50' },
           { label: 'Scheduled', value: scheduled.length, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: '24h Total Views', value: formatNumber(totalViews24), color: 'text-slate-700', bg: 'bg-slate-50' },
+          { label: 'Total Views (7d)', value: formatNumber(totalViews7d), color: 'text-slate-700', bg: 'bg-slate-50' },
           { label: 'Avg Engagement', value: `${avgEngagement}%`, color: 'text-purple-600', bg: 'bg-purple-50' },
         ].map(s => (
           <div key={s.label} className="card p-4">
