@@ -40,6 +40,29 @@ const Ago = ({ iso }: { iso: string | null }) => {
   return <span className={`text-[11px] flex-shrink-0 ${a.cls}`}>{a.text}</span>;
 };
 
+// One scheduled-invite row. Day-of (today) and next-day (tomorrow) get pinned + tinted so
+// the "remind right now" ones separate from the "already scheduled, confirm sometime" ones.
+function SchedRow({ it }: { it: any }) {
+  const tag = it.is_today ? { t: '今天', c: 'bg-red-100 text-red-700' }
+    : it.is_tomorrow ? { t: '明天', c: 'bg-amber-100 text-amber-700' } : null;
+  const tint = it.is_today ? 'bg-red-50/50' : it.is_tomorrow ? 'bg-amber-50/50' : '';
+  return (
+    <div className={`flex items-center gap-3 px-4 py-2.5 border-t border-slate-100 ${tint}`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-slate-800 truncate">{it.name}</span>
+          <IgLink handle={it.handle} />
+          {tag && <span className={`badge ${tag.c}`}>{tag.t}</span>}
+        </div>
+        <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+          <CalendarClock size={12} /> {it.visit_date} {it.visit_time} · 🍴 {it.restaurant}
+        </div>
+      </div>
+      <CopyMsg text={it.scheduled_message} />
+    </div>
+  );
+}
+
 function CopyMsg({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   if (!text) return null;
@@ -100,6 +123,8 @@ export default function Overview() {
 
   const t = data.todos;
   const sync = syncAge(data.lastSync);
+  const schedUrgent = t.scheduled_msg.filter((x: any) => x.is_today || x.is_tomorrow);
+  const schedRest = t.scheduled_msg.filter((x: any) => !x.is_today && !x.is_tomorrow);
 
   return (
     <div className="p-4 sm:p-6 space-y-5">
@@ -120,47 +145,47 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* ───────── ZONE 1: 现状一览 (passive numbers to know) ───────── */}
+      {/* ───────── ZONE 1: 现状一览 — compact so the action zone stays above the fold ───────── */}
       <section>
-        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">现状一览</div>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-          <div className="bg-slate-900 text-white rounded-xl p-3">
-            <div className="text-xs text-slate-300">活跃对话</div>
-            <div className="text-2xl font-bold">{data.total}</div>
+        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">现状一览</div>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          <div className="bg-slate-900 text-white rounded-lg px-3 py-2">
+            <div className="text-[11px] text-slate-300">活跃对话</div>
+            <div className="text-xl font-bold leading-tight">{data.total}</div>
           </div>
           {data.order.map((b: string) => (
-            <div key={b} className={`rounded-xl border p-3 ${METRIC_META[b]?.bg}`}>
-              <div className="text-xs text-slate-500">{METRIC_META[b]?.label}</div>
-              <div className={`text-2xl font-bold ${METRIC_META[b]?.color}`}>{data.metrics[b] || 0}</div>
+            <div key={b} className={`rounded-lg border px-3 py-2 ${METRIC_META[b]?.bg}`}>
+              <div className="text-[11px] text-slate-500">{METRIC_META[b]?.label}</div>
+              <div className={`text-xl font-bold leading-tight ${METRIC_META[b]?.color}`}>{data.metrics[b] || 0}</div>
             </div>
           ))}
         </div>
 
         {/* cumulative funnel — narrows monotonically (unlike the snapshot metrics above) */}
         {data.funnelBar && (
-          <div className="card mt-3 p-4">
-            <div className="flex items-end gap-2">
-              {data.funnelBar.map((s: any, i: number) => {
-                const max = data.funnelBar[0].count || 1;
-                const pct = Math.max(8, Math.round((s.count / max) * 100));
-                return (
-                  <React.Fragment key={s.key}>
-                    <div className="flex-1 text-center">
-                      <div className="text-xs text-slate-500 mb-1">{s.label}</div>
-                      <div className="h-7 bg-slate-100 rounded-md overflow-hidden flex items-center">
-                        <div className={`h-full rounded-md ${METRIC_META[s.key]?.bar || 'bg-slate-700'}`} style={{ width: `${pct}%` }} />
-                      </div>
-                      <div className="text-sm font-bold text-slate-800 mt-1">{s.count}</div>
+          <div className="card mt-2 px-4 py-2.5 flex items-center gap-2">
+            {data.funnelBar.map((s: any, i: number) => {
+              const max = data.funnelBar[0].count || 1;
+              const pct = Math.max(8, Math.round((s.count / max) * 100));
+              return (
+                <React.Fragment key={s.key}>
+                  <div className="flex-1">
+                    <div className="flex items-baseline justify-between mb-1">
+                      <span className="text-[11px] text-slate-500">{s.label}</span>
+                      <span className="text-xs font-bold text-slate-800">{s.count}</span>
                     </div>
-                    {i < data.funnelBar.length - 1 && <span className="text-slate-300 pb-7">▸</span>}
-                  </React.Fragment>
-                );
-              })}
-              <div className="pl-3 border-l border-slate-100 text-center self-center">
-                <div className="text-xs text-slate-500">转化率</div>
-                <div className="text-lg font-bold text-green-600">
-                  {data.funnelBar[0].count ? Math.round((data.funnelBar[data.funnelBar.length - 1].count / data.funnelBar[0].count) * 100) : 0}%
-                </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${METRIC_META[s.key]?.bar || 'bg-slate-700'}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                  {i < data.funnelBar.length - 1 && <span className="text-slate-300 text-xs">▸</span>}
+                </React.Fragment>
+              );
+            })}
+            <div className="pl-3 ml-1 border-l border-slate-100 text-center">
+              <div className="text-[11px] text-slate-500">转化率</div>
+              <div className="text-base font-bold text-green-600">
+                {data.funnelBar[0].count ? Math.round((data.funnelBar[data.funnelBar.length - 1].count / data.funnelBar[0].count) * 100) : 0}%
               </div>
             </div>
           </div>
@@ -175,23 +200,13 @@ export default function Overview() {
         </div>
 
         <div className="space-y-4">
-          {/* the morning job: scheduled messages to send */}
-          <TodoCard icon={<Send size={16} />} title="今天要发的邀约" count={t.scheduled_msg.length} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
-            {t.scheduled_msg.map((it: any, i: number) => (
-              <div key={i} className={`flex items-center gap-3 px-4 py-2.5 border-t border-slate-100 ${it.is_today ? 'bg-amber-50/60' : ''}`}>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-800 truncate">{it.name}</span>
-                    <IgLink handle={it.handle} />
-                    {it.is_today && <span className="badge bg-amber-100 text-amber-700">今天</span>}
-                  </div>
-                  <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-                    <CalendarClock size={12} /> {it.visit_date} {it.visit_time} · 🍴 {it.restaurant}
-                  </div>
-                </div>
-                <CopyMsg text={it.scheduled_message} />
-              </div>
-            ))}
+          {/* the morning job: scheduled invites — day-of reminders pinned, rest below */}
+          <TodoCard icon={<Send size={16} />} title="待发邀约" count={t.scheduled_msg.length} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
+            {schedUrgent.map((it: any, i: number) => <SchedRow key={`u${i}`} it={it} />)}
+            {schedUrgent.length > 0 && schedRest.length > 0 && (
+              <div className="px-4 py-1 text-[11px] font-medium text-slate-400 bg-slate-50 border-t border-slate-100">其余已排期</div>
+            )}
+            {schedRest.map((it: any, i: number) => <SchedRow key={`r${i}`} it={it} />)}
           </TodoCard>
 
           {/* three action queues */}
@@ -221,7 +236,7 @@ export default function Overview() {
               ))}
             </TodoCard>
 
-            <TodoCard icon={<DollarSign size={16} />} title="待付款" count={t.unpaid.length} accent="text-emerald-600" headerBg="bg-emerald-50" badge="bg-emerald-100 text-emerald-700" small>
+            <TodoCard icon={<DollarSign size={16} />} title={`待付款 · 共 $${data.payments.unpaid_total || 0}`} count={t.unpaid.length} accent="text-emerald-600" headerBg="bg-emerald-50" badge="bg-emerald-100 text-emerald-700" small>
               {t.unpaid.map((it: any, i: number) => (
                 <div key={i} className="flex items-center gap-2 px-4 py-2 border-t border-slate-100 text-sm">
                   <span className="text-slate-700 truncate">{it.name}</span>

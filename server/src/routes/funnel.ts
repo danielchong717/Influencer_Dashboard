@@ -44,23 +44,28 @@ router.get('/', (req, res) => {
 
   // To-Do action queues (these need names + context)
   const today = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const byVisit = (a: any, b: any) => (a.visit_date || '9999').localeCompare(b.visit_date || '9999');
+  // stalest first: the row untouched longest floats to the top (most likely to be forgotten)
+  const byStale = (a: any, b: any) => (a.last_modified || '9999').localeCompare(b.last_modified || '9999');
   const todos = {
     // ONLY 已排期 (an actual time is set) belongs here — you can't send a dated Scheduled
-    // Message without a time. 已敲定待约时间 (agreed, no time yet) stays in the 沟通中 metric,
-    // which also fixes its double-count (it was previously both a 沟通中 stat and a 待发 task).
+    // Message without a time. 已敲定待约时间 (agreed, no time yet) stays in the 沟通中 metric.
+    // Soonest visit first; today/tomorrow flagged so the client can pin the day-of reminders.
     scheduled_msg: rows.filter((r) => r.status_raw === '已排期')
-      .sort(byVisit).map((r) => ({ ...item(r), is_today: r.visit_date === today })),
-    // ball in our court
-    reply_needed: rows.filter((r) => r.status_raw === '等我们回').map(item),
-    // visited but not posted yet
+      .sort(byVisit)
+      .map((r) => ({ ...item(r), is_today: r.visit_date === today, is_tomorrow: r.visit_date === tomorrow })),
+    reply_needed: rows.filter((r) => r.status_raw === '等我们回').sort(byStale).map(item),
     to_post: rows.filter((r) => ['已到店', '待发 reel', '待发帖'].includes(r.status_raw)).sort(byVisit).map(item),
-    // owed cash, unpaid
-    unpaid: rows.filter((r) => r.amount > 0 && !r.paid).map(item),
+    unpaid: rows.filter((r) => r.amount > 0 && !r.paid).sort(byStale).map(item),
   };
 
   const owed = rows.filter((r) => r.amount > 0);
-  const payments = { paid: owed.filter((r) => r.paid).length, unpaid: owed.filter((r) => !r.paid).length };
+  const payments = {
+    paid: owed.filter((r) => r.paid).length,
+    unpaid: owed.filter((r) => !r.paid).length,
+    unpaid_total: owed.filter((r) => !r.paid).reduce((s, r) => s + (r.amount || 0), 0),
+  };
 
   // per-restaurant mini breakdown. Unassigned is pulled OUT — it's a data-quality gap
   // (conversations the team hasn't tagged with a restaurant yet), not a real restaurant.
