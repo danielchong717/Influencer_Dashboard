@@ -66,6 +66,9 @@ export const getReportTimeline = (params?: Record<string, string>) => api.get<an
 export const getReportTakeaways = (params?: Record<string, string>) => api.get<any>('/report/takeaways', { params });
 export const getProfileBreakdown = (params?: Record<string, string>) => api.get<any[]>('/report/profile-breakdown', { params });
 
+// Funnel (Overview)
+export const getFunnel = (params?: Record<string, string>) => api.get<any>('/funnel', { params });
+
 // Long-term
 export const getLongTermPartners = () => api.get<any[]>('/longterm');
 export const signLongTermPartner = (data: any) => api.post('/longterm', data);
