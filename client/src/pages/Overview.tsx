@@ -118,7 +118,7 @@ function ActionRow({ it, right, done, onToggle }: any) {
   );
 }
 
-function TodoCard({ step, icon, title, sub, count, accent, headerBg, badge, children }: any) {
+function TodoCard({ step, icon, title, sub, count, empty, accent, headerBg, badge, children }: any) {
   return (
     <div className="card flex flex-col min-h-0 overflow-hidden">
       <div className={`px-4 py-2.5 border-b border-slate-100 ${headerBg || ''}`}>
@@ -131,7 +131,7 @@ function TodoCard({ step, icon, title, sub, count, accent, headerBg, badge, chil
         {sub && <div className="text-[11px] text-slate-500 mt-0.5 pl-1">{sub}</div>}
       </div>
       <div className="overflow-y-auto max-h-72">
-        {count === 0 ? <div className="px-4 py-6 text-center text-xs text-slate-300">清空了 ✓</div> : children}
+        {empty ? <div className="px-4 py-6 text-center text-xs text-slate-300">清空了 ✓</div> : children}
       </div>
     </div>
   );
@@ -145,7 +145,7 @@ export default function Overview() {
   const [error, setError] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showPub, setShowPub] = useState(false);     // 已发布成果 reference view
-  const [showDone, setShowDone] = useState(false);   // reveal already-handled rows
+  const [hideDone, setHideDone] = useState(false);   // optionally declutter handled rows
   const [q, setQ] = useState('');
   const [chan, setChan] = useState('all');            // channel focus: all / IG / 邮件
   const [preview, setPreview] = useState<any>(null);
@@ -180,8 +180,13 @@ export default function Overview() {
   });
   const matchQ = (it: any) => !q || (it.name || '').toLowerCase().includes(q.toLowerCase()) || (it.handle || '').toLowerCase().includes(q.toLowerCase());
   const matchChan = (it: any) => chan === 'all' || it.channel === chan;
-  // filter by search + channel, drop handled (unless revealing), keep order
-  const view = (items: any[]) => (items || []).filter(matchQ).filter(matchChan).filter((it) => showDone || !isHandled(it));
+  // handled rows STAY visible (crossed out) and sink to the bottom — never vanish.
+  // The toggle only optionally hides them to declutter.
+  const view = (items: any[]) => {
+    const arr = (items || []).filter(matchQ).filter(matchChan);
+    const visible = hideDone ? arr.filter((it) => !isHandled(it)) : arr;
+    return [...visible].sort((a, b) => Number(isHandled(a)) - Number(isHandled(b)));
+  };
   const liveCount = (items: any[]) => (items || []).filter((it) => matchQ(it) && matchChan(it) && !isHandled(it)).length;
 
   if (loading && !data) {
@@ -301,24 +306,24 @@ export default function Overview() {
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <ListChecks size={18} className="text-slate-700" />
           <h2 className="text-base font-bold text-slate-900">我的下一步</h2>
-          <span className="text-xs text-slate-400">回复 → 定时间 → 发邀约 → 催发帖 → 付款 · 每行可标 ✓ 已处理</span>
+          <span className="text-xs text-slate-400">回复 → 定时间 → 发邀约 → 催发帖 → 付款 · 点 ✓ 标已处理（划掉留底，不消失）</span>
           {doneCount > 0 && (
-            <button onClick={() => setShowDone((v) => !v)} className="ml-auto text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1">
-              <RotateCcw size={12} />{showDone ? '隐藏' : '显示'}已处理 {doneCount}
+            <button onClick={() => setHideDone((v) => !v)} className="ml-auto text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1">
+              <RotateCcw size={12} />{hideDone ? '显示' : '隐藏'}已处理 {doneCount}
             </button>
           )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-          <TodoCard step="①" icon={<MessageSquareReply size={16} />} title="待回复" sub="博主发来消息，球在我方 → 去回他" count={liveCount(t.reply_needed)} accent="text-blue-600" headerBg="bg-blue-50" badge="bg-blue-100 text-blue-700">
+          <TodoCard step="①" icon={<MessageSquareReply size={16} />} title="待回复" sub="博主发来消息，球在我方 → 去回他" count={liveCount(t.reply_needed)} empty={view(t.reply_needed).length === 0} accent="text-blue-600" headerBg="bg-blue-50" badge="bg-blue-100 text-blue-700">
             {view(t.reply_needed).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} />)}
           </TodoCard>
 
-          <TodoCard step="②" icon={<CalendarPlus size={16} />} title="待定到店时间" sub="已谈成，需我方敲定到店时间" count={liveCount(t.set_time)} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
+          <TodoCard step="②" icon={<CalendarPlus size={16} />} title="待定到店时间" sub="已谈成，需我方敲定到店时间" count={liveCount(t.set_time)} empty={view(t.set_time).length === 0} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
             {view(t.set_time).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} />)}
           </TodoCard>
 
-          <TodoCard step="③" icon={<Send size={16} />} title="发邀约确认" sub="已排期，发确认消息给博主（先看再复制）" count={liveCount(t.scheduled_msg)} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
+          <TodoCard step="③" icon={<Send size={16} />} title="发邀约确认" sub="已排期，发确认消息给博主（先看再复制）" count={liveCount(t.scheduled_msg)} empty={sched.length === 0} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
             {schedUrgent.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => toggle(it)} />)}
             {schedUrgent.length > 0 && schedRest.length > 0 && (
               <div className="px-4 py-1 text-[11px] font-medium text-slate-400 bg-slate-50 border-t border-slate-100">其余已排期（待确认）</div>
@@ -326,11 +331,11 @@ export default function Overview() {
             {schedRest.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => toggle(it)} />)}
           </TodoCard>
 
-          <TodoCard step="④" icon={<Clapperboard size={16} />} title="催发帖" sub="已到店，还没发帖 → 去催" count={liveCount(t.to_post)} accent="text-violet-600" headerBg="bg-violet-50" badge="bg-violet-100 text-violet-700">
+          <TodoCard step="④" icon={<Clapperboard size={16} />} title="催发帖" sub="已到店，还没发帖 → 去催" count={liveCount(t.to_post)} empty={view(t.to_post).length === 0} accent="text-violet-600" headerBg="bg-violet-50" badge="bg-violet-100 text-violet-700">
             {view(t.to_post).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} right={<span className="text-[11px] text-slate-400">到店 {it.visit_date || '?'}</span>} />)}
           </TodoCard>
 
-          <TodoCard step="⑤" icon={<DollarSign size={16} />} title={`付款 · 共 $${data.payments.unpaid_total || 0}`} sub="已发帖，现金报酬待付" count={liveCount(t.unpaid)} accent="text-emerald-600" headerBg="bg-emerald-50" badge="bg-emerald-100 text-emerald-700">
+          <TodoCard step="⑤" icon={<DollarSign size={16} />} title={`付款 · 共 $${data.payments.unpaid_total || 0}`} sub="已发帖，现金报酬待付" count={liveCount(t.unpaid)} empty={view(t.unpaid).length === 0} accent="text-emerald-600" headerBg="bg-emerald-50" badge="bg-emerald-100 text-emerald-700">
             {view(t.unpaid).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} right={<span className="text-red-500 font-medium text-sm">${it.amount}</span>} />)}
           </TodoCard>
         </div>
