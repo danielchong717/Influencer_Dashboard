@@ -52,7 +52,31 @@ export const FUNNEL_LABELS: Record<string, string> = {
   visited: '已到店', published: '已发布', declined: '婉拒', unknown: '待定',
 };
 
-type FeishuRecord = { record_id: string; fields: Record<string, any>; last_modified_time?: number };
+type FeishuRecord = { record_id: string; fields: Record<string, any>; last_modified_time?: number; shared_url?: string };
+
+/**
+ * Fetch the official PUBLIC record-share URLs (the only reliable per-row Feishu link —
+ * hand-built deep links drop params on mobile). batch_get takes ≤100 ids per call.
+ * Note: these only open without a login if the base's sharing is set to "anyone with link".
+ */
+async function fetchSharedUrls(token: string, ids: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const url = `${BASE}/open-apis/bitable/v1/apps/${BITABLE}/tables/${VISITS_TABLE}/records/batch_get`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_ids: chunk, with_shared_url: true }),
+    });
+    const d: any = await r.json();
+    if (d.code !== 0) continue; // links are best-effort; never fail the whole sync over them
+    for (const rec of d.data?.records || []) {
+      if (rec.shared_url) out[rec.record_id] = rec.shared_url;
+    }
+  }
+  return out;
+}
 
 async function tenantToken(): Promise<string> {
   if (!APP_SECRET) throw new Error('FEISHU_APP_SECRET is not set (see .env / ~/Desktop/.env.secrets)');
@@ -171,6 +195,7 @@ function ensureFunnelTable() {
       post_url TEXT,
       scheduled_message TEXT,
       last_modified TEXT,
+      feishu_url TEXT,
       paid INTEGER DEFAULT 0,
       amount REAL DEFAULT 0,
       updated_at TEXT
@@ -181,6 +206,7 @@ function ensureFunnelTable() {
   if (!cols.includes('scheduled_message')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN scheduled_message TEXT`);
   if (!cols.includes('visit_time')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN visit_time TEXT`);
   if (!cols.includes('last_modified')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN last_modified TEXT`);
+  if (!cols.includes('feishu_url')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN feishu_url TEXT`);
 }
 
 export type SyncResult = {
@@ -272,17 +298,21 @@ export function syncFromRecords(records: FeishuRecord[]): SyncResult {
       // Feishu's built-in last-modified time = when this conversation's row last changed
       // (good "how stale is this" signal for the to-do queues). Needs automatic_fields=true.
       const lastModified = rec.last_modified_time ? new Date(rec.last_modified_time).toISOString() : null;
+      const channelRaw = cellText(f['平台']).trim();
+      const channel = channelRaw === 'IG' ? 'IG' : channelRaw === 'Email' ? '邮件' : (channelRaw || 'IG');
+      const feishuUrl = rec.shared_url || '';
 
       // --- funnel mirror: EVERY row (full funnel, this is the Overview's source) ---
       seenFunnelChatIds.add(chatId);
       db.prepare(
-        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, pub_date, post_url, scheduled_message, last_modified, paid, amount, updated_at)
-         VALUES (?, 'instagram', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(chat_id) DO UPDATE SET name=excluded.name, handle=excluded.handle, restaurant=excluded.restaurant,
+        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, pub_date, post_url, scheduled_message, last_modified, feishu_url, paid, amount, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(chat_id) DO UPDATE SET channel=excluded.channel, name=excluded.name, handle=excluded.handle, restaurant=excluded.restaurant,
            status_raw=excluded.status_raw, bucket=excluded.bucket, note=excluded.note, visit_date=excluded.visit_date,
            visit_time=excluded.visit_time, pub_date=excluded.pub_date, post_url=excluded.post_url,
-           scheduled_message=excluded.scheduled_message, last_modified=excluded.last_modified, paid=excluded.paid, amount=excluded.amount, updated_at=excluded.updated_at`
-      ).run(chatId, name, username, restaurant, status, bucket, notes, visitDate, visitTime, pubDate, postUrl, schedMsg, lastModified, paid, cash, now);
+           scheduled_message=excluded.scheduled_message, last_modified=excluded.last_modified, feishu_url=excluded.feishu_url,
+           paid=excluded.paid, amount=excluded.amount, updated_at=excluded.updated_at`
+      ).run(chatId, channel, name, username, restaurant, status, bucket, notes, visitDate, visitTime, pubDate, postUrl, schedMsg, lastModified, feishuUrl, paid, cash, now);
       funnelCounts[bucket] = (funnelCounts[bucket] || 0) + 1;
 
       // --- downstream CRM (kanban/payment) only for confirmed+ rows ---
@@ -371,5 +401,9 @@ export async function syncFromFeishu(): Promise<SyncResult> {
   }
   const token = await tenantToken();
   const records = await listRecords(token, VISITS_TABLE);
+  // attach public share links (only for rows that will land in the funnel — they have a 状态)
+  const active = records.filter((r) => cellText(r.fields['状态']).trim());
+  const urls = await fetchSharedUrls(token, active.map((r) => r.record_id));
+  for (const r of records) r.shared_url = urls[r.record_id];
   return syncFromRecords(records);
 }

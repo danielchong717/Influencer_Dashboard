@@ -9,10 +9,10 @@ function funnelExists(): boolean {
 }
 
 const item = (r: any) => ({
-  name: r.name, handle: r.handle, restaurant: r.restaurant, status: r.status_raw,
+  name: r.name, handle: r.handle, restaurant: r.restaurant, status: r.status_raw, channel: r.channel,
   note: r.note, visit_date: r.visit_date, visit_time: r.visit_time, pub_date: r.pub_date,
   post_url: r.post_url, scheduled_message: r.scheduled_message, last_modified: r.last_modified,
-  paid: !!r.paid, amount: r.amount,
+  feishu_url: r.feishu_url, paid: !!r.paid, amount: r.amount,
 });
 
 /**

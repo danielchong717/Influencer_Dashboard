@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Send, MessageSquareReply, Clapperboard, DollarSign, RefreshCw, Copy, Check,
-  ExternalLink, Store, CalendarClock, AlertTriangle, ListChecks, CalendarPlus, ChevronDown,
+  ExternalLink, Store, CalendarClock, AlertTriangle, ListChecks, CalendarPlus, ChevronDown, Eye, X,
 } from 'lucide-react';
 import { getFunnel } from '../lib/api';
 import { useAppStore } from '../store';
@@ -40,66 +40,89 @@ const Ago = ({ iso }: { iso: string | null }) => {
   return <span className={`text-[11px] flex-shrink-0 ${a.cls}`}>{a.text}</span>;
 };
 
-// One scheduled-invite row. Day-of (today) and next-day (tomorrow) get pinned + tinted so
-// the "remind right now" ones separate from the "already scheduled, confirm sometime" ones.
-function SchedRow({ it }: { it: any }) {
+// One scheduled-invite row. Day-of (today) and next-day (tomorrow) get pinned + tinted.
+// "查看消息" opens a preview so you verify the message before copying — not a blind copy.
+function SchedRow({ it, onView }: { it: any; onView: (it: any) => void }) {
   const tag = it.is_today ? { t: '今天', c: 'bg-red-100 text-red-700' }
     : it.is_tomorrow ? { t: '明天', c: 'bg-amber-100 text-amber-700' } : null;
   const tint = it.is_today ? 'bg-red-50/50' : it.is_tomorrow ? 'bg-amber-50/50' : '';
   return (
     <div className={`flex items-center gap-3 px-4 py-2.5 border-t border-slate-100 ${tint}`}>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-slate-800 truncate">{it.name}</span>
-          <IgLink handle={it.handle} />
+          <Chan c={it.channel} />
           {tag && <span className={`badge ${tag.c}`}>{tag.t}</span>}
+          <RowLinks it={it} />
         </div>
         <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
           <CalendarClock size={12} /> {it.visit_date} {it.visit_time} · 🍴 {it.restaurant}
         </div>
       </div>
-      <CopyMsg text={it.scheduled_message} />
+      {it.scheduled_message && (
+        <button onClick={() => onView(it)}
+          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 flex-shrink-0">
+          <Eye size={12} /> 查看消息
+        </button>
+      )}
     </div>
   );
 }
 
-function CopyMsg({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  if (!text) return null;
+// A small action row used by 回复/定时间/催发帖/付款 — name + channel + last-touched + links.
+function ActionRow({ it, right }: { it: any; right?: React.ReactNode }) {
   return (
-    <button
-      onClick={() => { navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500); }}
-      className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-600 flex-shrink-0"
-      title="复制 Scheduled Message"
-    >
-      {done ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
-      {done ? '已复制' : '复制消息'}
-    </button>
+    <div className="px-4 py-2 border-t border-slate-100">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-medium text-slate-800 text-sm truncate">{it.name}</span>
+        <Chan c={it.channel} />
+        <RowLinks it={it} />
+        <span className="ml-auto flex items-center gap-2">{right}<Ago iso={it.last_modified} /></span>
+      </div>
+      {it.note && <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">{it.note}</div>}
+    </div>
   );
 }
 
-function IgLink({ handle }: { handle: string }) {
-  if (!handle) return null;
-  return (
-    <a href={`https://instagram.com/${handle}`} target="_blank" rel="noreferrer"
-       className="text-pink-500 hover:text-pink-700 flex-shrink-0" title={`@${handle}`}>
-      <ExternalLink size={13} />
-    </a>
-  );
-}
-
-function TodoCard({ icon, title, count, accent, headerBg, badge, children, small }: any) {
+function TodoCard({ step, icon, title, sub, count, accent, headerBg, badge, children }: any) {
   return (
     <div className="card flex flex-col min-h-0 overflow-hidden">
-      <div className={`flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 ${headerBg || ''}`}>
-        <span className={accent}>{icon}</span>
-        <span className="font-semibold text-slate-800 text-sm">{title}</span>
-        <span className={`badge ml-auto ${count > 0 ? (badge || 'bg-slate-200 text-slate-700') : 'bg-slate-50 text-slate-400'}`}>{count}</span>
+      <div className={`px-4 py-2.5 border-b border-slate-100 ${headerBg || ''}`}>
+        <div className="flex items-center gap-2">
+          {step && <span className="text-[11px] font-bold text-slate-400">{step}</span>}
+          <span className={accent}>{icon}</span>
+          <span className="font-semibold text-slate-800 text-sm">{title}</span>
+          <span className={`badge ml-auto ${count > 0 ? (badge || 'bg-slate-200 text-slate-700') : 'bg-slate-50 text-slate-400'}`}>{count}</span>
+        </div>
+        {sub && <div className="text-[11px] text-slate-500 mt-0.5 pl-1">{sub}</div>}
       </div>
-      <div className={`overflow-y-auto ${small ? 'max-h-56' : 'max-h-72'}`}>
+      <div className="overflow-y-auto max-h-72">
         {count === 0 ? <div className="px-4 py-6 text-center text-xs text-slate-300">清空了 ✓</div> : children}
       </div>
     </div>
+  );
+}
+
+// channel badge — which inbox this conversation lives in (so you know where to go act)
+function Chan({ c }: { c: string }) {
+  if (!c) return null;
+  const map: Record<string, string> = { IG: 'bg-pink-100 text-pink-700', '邮件': 'bg-blue-100 text-blue-700', '小红书': 'bg-red-100 text-red-700' };
+  return <span className={`badge text-[10px] px-1.5 py-0 ${map[c] || 'bg-slate-100 text-slate-500'}`}>{c}</span>;
+}
+
+// per-row links: open the full row in Feishu (public link) + jump to the IG profile
+function RowLinks({ it }: { it: any }) {
+  return (
+    <span className="flex items-center gap-1.5 flex-shrink-0">
+      {it.feishu_url && (
+        <a href={it.feishu_url} target="_blank" rel="noreferrer"
+           className="text-[11px] text-blue-600 hover:text-blue-800 border border-blue-100 bg-blue-50 rounded px-1.5 py-0.5">飞书↗</a>
+      )}
+      {it.handle && (
+        <a href={`https://instagram.com/${it.handle}`} target="_blank" rel="noreferrer"
+           className="text-pink-500 hover:text-pink-700" title={`@${it.handle}`}><ExternalLink size={13} /></a>
+      )}
+    </span>
   );
 }
 
@@ -108,6 +131,8 @@ export default function Overview() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showStats, setShowStats] = useState(false); // passive metrics off by default — this is an action board
+  const [preview, setPreview] = useState<any>(null);  // the invite whose message is being previewed
+  const [copied, setCopied] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -199,74 +224,47 @@ export default function Overview() {
       </section>
       )}
 
-      {/* ───────── THE BOARD: 我的下一步 — the whole point. Action queues, flow-ordered. ───────── */}
+      {/* ───────── THE BOARD: 我的下一步 — flow-ordered action queues (the whole point) ───────── */}
       <section className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
           <ListChecks size={18} className="text-slate-700" />
           <h2 className="text-base font-bold text-slate-900">我的下一步</h2>
-          <span className="text-xs text-slate-400">按对接流程排序 · 点开 ↗ 去 IG 处理</span>
+          <span className="text-xs text-slate-400">按对接流程：回复 → 定时间 → 发邀约 → 催发帖 → 付款 · 每行可开飞书/IG</span>
         </div>
 
-        <div className="space-y-4">
-          {/* time-critical: invites for today/tomorrow visits pinned on top, rest below */}
-          <TodoCard icon={<Send size={16} />} title="发邀约确认" count={t.scheduled_msg.length} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
-            {schedUrgent.map((it: any, i: number) => <SchedRow key={`u${i}`} it={it} />)}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          {/* ① reply: they messaged us, ball in our court */}
+          <TodoCard step="①" icon={<MessageSquareReply size={16} />} title="待回复" sub="博主发来消息，球在我方 → 去回他" count={t.reply_needed.length} accent="text-blue-600" headerBg="bg-blue-50" badge="bg-blue-100 text-blue-700">
+            {t.reply_needed.map((it: any, i: number) => <ActionRow key={i} it={it} />)}
+          </TodoCard>
+
+          {/* ② set time: agreed, but no visit time yet */}
+          <TodoCard step="②" icon={<CalendarPlus size={16} />} title="待定到店时间" sub="已谈成，需我方敲定到店时间" count={t.set_time?.length || 0} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
+            {(t.set_time || []).map((it: any, i: number) => <ActionRow key={i} it={it} />)}
+          </TodoCard>
+
+          {/* ③ send invite confirmation: time is set, send/confirm message (today/tomorrow pinned) */}
+          <TodoCard step="③" icon={<Send size={16} />} title="发邀约确认" sub="已排期，发确认消息给博主（先看再复制）" count={t.scheduled_msg.length} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
+            {schedUrgent.map((it: any, i: number) => <SchedRow key={`u${i}`} it={it} onView={(x) => { setPreview(x); setCopied(false); }} />)}
             {schedUrgent.length > 0 && schedRest.length > 0 && (
               <div className="px-4 py-1 text-[11px] font-medium text-slate-400 bg-slate-50 border-t border-slate-100">其余已排期（待确认）</div>
             )}
-            {schedRest.map((it: any, i: number) => <SchedRow key={`r${i}`} it={it} />)}
+            {schedRest.map((it: any, i: number) => <SchedRow key={`r${i}`} it={it} onView={(x) => { setPreview(x); setCopied(false); }} />)}
           </TodoCard>
 
-          {/* the rest of the flow, in order: reply → set time → chase post → pay */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <TodoCard icon={<MessageSquareReply size={16} />} title="回复博主" count={t.reply_needed.length} accent="text-blue-600" headerBg="bg-blue-50" badge="bg-blue-100 text-blue-700">
-              {t.reply_needed.map((it: any, i: number) => (
-                <div key={i} className="px-4 py-2 border-t border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-800 text-sm truncate">{it.name}</span>
-                    <IgLink handle={it.handle} />
-                    <span className="ml-auto"><Ago iso={it.last_modified} /></span>
-                  </div>
-                  {it.note && <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">{it.note}</div>}
-                </div>
-              ))}
-            </TodoCard>
+          {/* ④ chase post: visited, hasn't posted */}
+          <TodoCard step="④" icon={<Clapperboard size={16} />} title="催发帖" sub="已到店，还没发帖 → 去催" count={t.to_post.length} accent="text-violet-600" headerBg="bg-violet-50" badge="bg-violet-100 text-violet-700">
+            {t.to_post.map((it: any, i: number) => (
+              <ActionRow key={i} it={it} right={<span className="text-[11px] text-slate-400">到店 {it.visit_date || '?'}</span>} />
+            ))}
+          </TodoCard>
 
-            <TodoCard icon={<CalendarPlus size={16} />} title="定到店时间" count={t.set_time?.length || 0} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
-              {(t.set_time || []).map((it: any, i: number) => (
-                <div key={i} className="px-4 py-2 border-t border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-800 text-sm truncate">{it.name}</span>
-                    <IgLink handle={it.handle} />
-                    <span className="ml-auto"><Ago iso={it.last_modified} /></span>
-                  </div>
-                  {it.note && <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">{it.note}</div>}
-                </div>
-              ))}
-            </TodoCard>
-
-            <TodoCard icon={<Clapperboard size={16} />} title="催发帖" count={t.to_post.length} accent="text-violet-600" headerBg="bg-violet-50" badge="bg-violet-100 text-violet-700">
-              {t.to_post.map((it: any, i: number) => (
-                <div key={i} className="px-4 py-2 border-t border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-800 text-sm truncate">{it.name}</span>
-                    <IgLink handle={it.handle} />
-                    <span className="text-xs text-slate-400 ml-auto">{it.visit_date || ''}</span>
-                  </div>
-                </div>
-              ))}
-            </TodoCard>
-
-            <TodoCard icon={<DollarSign size={16} />} title={`付款 · 共 $${data.payments.unpaid_total || 0}`} count={t.unpaid.length} accent="text-emerald-600" headerBg="bg-emerald-50" badge="bg-emerald-100 text-emerald-700">
-              {t.unpaid.map((it: any, i: number) => (
-                <div key={i} className="flex items-center gap-2 px-4 py-2 border-t border-slate-100 text-sm">
-                  <span className="text-slate-700 truncate">{it.name}</span>
-                  <Ago iso={it.last_modified} />
-                  <span className="text-red-500 font-medium flex-shrink-0 ml-auto">${it.amount}</span>
-                </div>
-              ))}
-            </TodoCard>
-          </div>
+          {/* ⑤ pay */}
+          <TodoCard step="⑤" icon={<DollarSign size={16} />} title={`付款 · 共 $${data.payments.unpaid_total || 0}`} sub="已发帖，现金报酬待付" count={t.unpaid.length} accent="text-emerald-600" headerBg="bg-emerald-50" badge="bg-emerald-100 text-emerald-700">
+            {t.unpaid.map((it: any, i: number) => (
+              <ActionRow key={i} it={it} right={<span className="text-red-500 font-medium text-sm">${it.amount}</span>} />
+            ))}
+          </TodoCard>
         </div>
       </section>
 
@@ -288,6 +286,32 @@ export default function Overview() {
           )}
         </div>
       </section>
+
+      {/* message preview — verify the invite before copying (not a blind copy) */}
+      {preview && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setPreview(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <div>
+                <div className="font-semibold text-slate-900">{preview.name} 的邀约消息</div>
+                <div className="text-xs text-slate-500">{preview.visit_date} {preview.visit_time} · {preview.restaurant} · 确认无误再复制</div>
+              </div>
+              <button onClick={() => setPreview(null)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+            </div>
+            <pre className="px-5 py-4 text-sm text-slate-700 whitespace-pre-wrap break-words max-h-[50vh] overflow-y-auto font-sans">{preview.scheduled_message}</pre>
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100">
+              {preview.feishu_url && (
+                <a href={preview.feishu_url} target="_blank" rel="noreferrer" className="btn-secondary">飞书打开此行 ↗</a>
+              )}
+              <button
+                onClick={() => { navigator.clipboard.writeText(preview.scheduled_message || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+                className="btn-primary flex items-center gap-1.5">
+                {copied ? <Check size={14} /> : <Copy size={14} />}{copied ? '已复制' : '复制消息'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
