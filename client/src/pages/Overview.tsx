@@ -140,6 +140,7 @@ export default function Overview() {
   const [showStats, setShowStats] = useState(false);
   const [showDone, setShowDone] = useState(false);   // reveal already-handled rows
   const [q, setQ] = useState('');
+  const [chan, setChan] = useState('all');            // channel focus: all / IG / 邮件
   const [preview, setPreview] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [, setTick] = useState(0);                    // re-render relative times
@@ -171,9 +172,10 @@ export default function Overview() {
     return next;
   });
   const matchQ = (it: any) => !q || (it.name || '').toLowerCase().includes(q.toLowerCase()) || (it.handle || '').toLowerCase().includes(q.toLowerCase());
-  // filter by search, drop handled (unless revealing), keep order
-  const view = (items: any[]) => (items || []).filter(matchQ).filter((it) => showDone || !isHandled(it));
-  const liveCount = (items: any[]) => (items || []).filter((it) => matchQ(it) && !isHandled(it)).length;
+  const matchChan = (it: any) => chan === 'all' || it.channel === chan;
+  // filter by search + channel, drop handled (unless revealing), keep order
+  const view = (items: any[]) => (items || []).filter(matchQ).filter(matchChan).filter((it) => showDone || !isHandled(it));
+  const liveCount = (items: any[]) => (items || []).filter((it) => matchQ(it) && matchChan(it) && !isHandled(it)).length;
 
   if (loading && !data) {
     return (
@@ -216,6 +218,14 @@ export default function Overview() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+            {['all', 'IG', '邮件'].map((c) => (
+              <button key={c} onClick={() => setChan(c)}
+                className={`px-2.5 py-1.5 ${chan === c ? 'bg-slate-800 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>
+                {c === 'all' ? '全部' : c}
+              </button>
+            ))}
+          </div>
           <div className="relative">
             <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜博主…"
