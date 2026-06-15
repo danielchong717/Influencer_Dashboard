@@ -56,6 +56,8 @@ router.get('/', (req, res) => {
       .sort(byVisit)
       .map((r) => ({ ...item(r), is_today: r.visit_date === today, is_tomorrow: r.visit_date === tomorrow })),
     reply_needed: rows.filter((r) => r.status_raw === '等我们回').sort(byStale).map(item),
+    // agreed to collab but no time set yet → our move is to nail down a time
+    set_time: rows.filter((r) => r.status_raw === '已敲定待约时间').sort(byStale).map(item),
     to_post: rows.filter((r) => ['已到店', '待发 reel', '待发帖'].includes(r.status_raw)).sort(byVisit).map(item),
     unpaid: rows.filter((r) => r.amount > 0 && !r.paid).sort(byStale).map(item),
   };
