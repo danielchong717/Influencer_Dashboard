@@ -1,8 +1,17 @@
 import { Router } from 'express';
 import db from '../db';
-import { FUNNEL_ORDER, FUNNEL_LABELS } from '../services/feishuSync';
+import { FUNNEL_ORDER, FUNNEL_LABELS, markAction } from '../services/feishuSync';
 
 const router = Router();
+
+// POST /api/funnel/action — write a team-action back to Feishu (two-way).
+// body: { chat_id, action: reply|settime|invite|chase|pay, done }
+router.post('/action', async (req, res) => {
+  const { chat_id, action, done } = req.body || {};
+  if (!chat_id || !action) return res.status(400).json({ ok: false, error: 'chat_id and action required' });
+  const r = await markAction(chat_id, action, done !== false);
+  res.status(r.ok ? 200 : 500).json(r);
+});
 
 function funnelExists(): boolean {
   return !!db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='ig_funnel'`).get();
@@ -13,7 +22,7 @@ const item = (r: any) => ({
   name: r.name, handle: r.handle, restaurant: r.restaurant, status: r.status_raw, channel: r.channel,
   note: r.note, visit_date: r.visit_date, visit_time: r.visit_time, pub_date: r.pub_date,
   post_url: r.post_url, post_type: r.post_type, owner: r.owner, scheduled_message: r.scheduled_message,
-  last_modified: r.last_modified, feishu_url: r.feishu_url, paid: !!r.paid, amount: r.amount,
+  last_modified: r.last_modified, feishu_url: r.feishu_url, action_done: !!r.action_done, paid: !!r.paid, amount: r.amount,
 });
 
 /**

@@ -48,6 +48,19 @@ const BUCKET_MAP: Record<string, string> = {
   婉拒告吹: 'declined',
   取消: 'declined',
 };
+// Team-action checkbox fields in Feishu (AI never touches these). status → the field whose
+// checkbox means "this step is handled" — used to read action_done back on sync.
+const STATUS_DONE_FIELD: Record<string, string> = {
+  等我们回: '已回复',
+  已敲定待约时间: '时间已跟进',
+  已排期: '邀约已发',
+  已到店: '已催发帖', '待发 reel': '已催发帖', 待发帖: '已催发帖',
+};
+// dashboard action key → the Feishu field it writes (pay is special: the existing 支付状态).
+export const ACTION_FIELD: Record<string, string> = {
+  reply: '已回复', settime: '时间已跟进', invite: '邀约已发', chase: '已催发帖',
+};
+
 // Display order + zh labels for the funnel (declined shown separately/muted).
 export const FUNNEL_ORDER = ['no_reply', 'talking', 'scheduled', 'visited', 'published'] as const;
 export const FUNNEL_LABELS: Record<string, string> = {
@@ -112,7 +125,7 @@ async function listRecords(token: string, table: string, base: string = BITABLE)
 // A normalized funnel row from the email channel, shaped to upsert into ig_funnel.
 type FunnelEntry = {
   chat_id: string; channel: string; name: string; handle: string; restaurant: string;
-  status_raw: string; bucket: string; note: string; last_modified: string | null; feishu_url: string;
+  status_raw: string; bucket: string; note: string; last_modified: string | null; feishu_url: string; record_id: string;
 };
 
 /**
@@ -149,6 +162,7 @@ async function fetchEmailEntries(token: string): Promise<FunnelEntry[]> {
       note: (cellText(f['Next Step']) || cellText(f['Status'])).slice(0, 1000),
       last_modified: r.last_modified_time ? new Date(r.last_modified_time).toISOString() : null,
       feishu_url: urls[r.record_id] || '',
+      record_id: r.record_id,
     };
   });
 }
@@ -245,6 +259,8 @@ function ensureFunnelTable() {
       scheduled_message TEXT,
       last_modified TEXT,
       feishu_url TEXT,
+      record_id TEXT,
+      action_done INTEGER DEFAULT 0,
       paid INTEGER DEFAULT 0,
       amount REAL DEFAULT 0,
       updated_at TEXT
@@ -258,6 +274,8 @@ function ensureFunnelTable() {
   if (!cols.includes('feishu_url')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN feishu_url TEXT`);
   if (!cols.includes('post_type')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN post_type TEXT`);
   if (!cols.includes('owner')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN owner TEXT`);
+  if (!cols.includes('record_id')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN record_id TEXT`);
+  if (!cols.includes('action_done')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN action_done INTEGER DEFAULT 0`);
 }
 
 export type SyncResult = {
@@ -354,18 +372,21 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
       const feishuUrl = rec.shared_url || '';
       const postType = cellText(f['帖子类型']).trim();
       const owner = cellText(f['负责人']).trim();
+      // team-action checkbox for this row's current step (Feishu = source of truth for IG)
+      const doneField = STATUS_DONE_FIELD[status];
+      const actionDone = doneField && f[doneField] === true ? 1 : 0;
 
       // --- funnel mirror: EVERY row (full funnel, this is the Overview's source) ---
       seenFunnelChatIds.add(chatId);
       db.prepare(
-        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, pub_date, post_url, post_type, owner, scheduled_message, last_modified, feishu_url, paid, amount, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, pub_date, post_url, post_type, owner, scheduled_message, last_modified, feishu_url, record_id, action_done, paid, amount, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(chat_id) DO UPDATE SET channel=excluded.channel, name=excluded.name, handle=excluded.handle, restaurant=excluded.restaurant,
            status_raw=excluded.status_raw, bucket=excluded.bucket, note=excluded.note, visit_date=excluded.visit_date,
            visit_time=excluded.visit_time, pub_date=excluded.pub_date, post_url=excluded.post_url, post_type=excluded.post_type, owner=excluded.owner,
            scheduled_message=excluded.scheduled_message, last_modified=excluded.last_modified, feishu_url=excluded.feishu_url,
-           paid=excluded.paid, amount=excluded.amount, updated_at=excluded.updated_at`
-      ).run(chatId, channel, name, username, restaurant, status, bucket, notes, visitDate, visitTime, pubDate, postUrl, postType, owner, schedMsg, lastModified, feishuUrl, paid, cash, now);
+           record_id=excluded.record_id, action_done=excluded.action_done, paid=excluded.paid, amount=excluded.amount, updated_at=excluded.updated_at`
+      ).run(chatId, channel, name, username, restaurant, status, bucket, notes, visitDate, visitTime, pubDate, postUrl, postType, owner, schedMsg, lastModified, feishuUrl, rec.record_id, actionDone, paid, cash, now);
       funnelCounts[bucket] = (funnelCounts[bucket] || 0) + 1;
 
       // --- downstream CRM (kanban/payment) only for confirmed+ rows ---
@@ -438,13 +459,15 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
     // --- Gmail-channel actionable rows merged into the same funnel (待回复 / 待定时间) ---
     for (const e of emailEntries) {
       seenFunnelChatIds.add(e.chat_id);
+      // NOTE: action_done intentionally NOT in the ON CONFLICT SET — email has no Feishu
+      // checkbox, so a dashboard ✓ on an email row is preserved locally across syncs.
       db.prepare(
-        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, last_modified, feishu_url, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, last_modified, feishu_url, record_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(chat_id) DO UPDATE SET channel=excluded.channel, name=excluded.name, restaurant=excluded.restaurant,
            status_raw=excluded.status_raw, bucket=excluded.bucket, note=excluded.note,
-           last_modified=excluded.last_modified, feishu_url=excluded.feishu_url, updated_at=excluded.updated_at`
-      ).run(e.chat_id, e.channel, e.name, e.handle, e.restaurant, e.status_raw, e.bucket, e.note, e.last_modified, e.feishu_url, new Date().toISOString());
+           last_modified=excluded.last_modified, feishu_url=excluded.feishu_url, record_id=excluded.record_id, updated_at=excluded.updated_at`
+      ).run(e.chat_id, e.channel, e.name, e.handle, e.restaurant, e.status_raw, e.bucket, e.note, e.last_modified, e.feishu_url, e.record_id, new Date().toISOString());
       funnelCounts[e.bucket] = (funnelCounts[e.bucket] || 0) + 1;
     }
   });
@@ -459,6 +482,49 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
     return reconcile(seenChatIds);
   })();
   return { scanned: records.length, imported, skipped, removed, funnel: funnelCounts, byStage, campaigns: [...campaignCache.keys()] };
+}
+
+async function updateRecord(token: string, recordId: string, fields: Record<string, any>): Promise<void> {
+  const url = `${BASE}/open-apis/bitable/v1/apps/${BITABLE}/tables/${VISITS_TABLE}/records/${recordId}`;
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+  const d: any = await r.json();
+  if (d.code !== 0) throw new Error(`update record failed: ${JSON.stringify(d)}`);
+}
+
+/**
+ * Write a team-action back to Feishu (and the local mirror) — this is what makes the board
+ * two-way. IG rows write a checkbox (or 支付状态) on the source record so the whole team
+ * sees it; email rows (em_*) only update the local mirror (no checkbox in the email table).
+ * Never touches the AI-managed 状态 field.
+ */
+export async function markAction(chatId: string, action: string, done: boolean): Promise<{ ok: boolean; error?: string }> {
+  const row = db.prepare(`SELECT record_id FROM ig_funnel WHERE chat_id=?`).get(chatId) as any;
+  if (!row) return { ok: false, error: 'row not found' };
+  const isIG = !chatId.startsWith('em_') && row.record_id;
+  try {
+    if (action === 'pay') {
+      if (isIG && BITABLE && VISITS_TABLE) {
+        const token = await tenantToken();
+        await updateRecord(token, row.record_id, { 支付状态: done ? '已支付' : '未支付' });
+      }
+      db.prepare(`UPDATE ig_funnel SET paid=? WHERE chat_id=?`).run(done ? 1 : 0, chatId);
+    } else {
+      const field = ACTION_FIELD[action];
+      if (!field) return { ok: false, error: `unknown action: ${action}` };
+      if (isIG && BITABLE && VISITS_TABLE) {
+        const token = await tenantToken();
+        await updateRecord(token, row.record_id, { [field]: done });
+      }
+      db.prepare(`UPDATE ig_funnel SET action_done=? WHERE chat_id=?`).run(done ? 1 : 0, chatId);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 export async function syncFromFeishu(): Promise<SyncResult> {

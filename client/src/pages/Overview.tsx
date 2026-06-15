@@ -4,7 +4,7 @@ import {
   ExternalLink, Store, CalendarClock, AlertTriangle, ListChecks, CalendarPlus, ChevronDown,
   Eye, X, Search, CheckCircle2, Circle, RotateCcw, WifiOff,
 } from 'lucide-react';
-import { getFunnel } from '../lib/api';
+import { getFunnel, markFunnelAction } from '../lib/api';
 import { useAppStore } from '../store';
 
 // Each funnel stage owns ONE signature color, reused on metric card + funnel bar + accents.
@@ -151,14 +151,12 @@ export default function Overview() {
   const [preview, setPreview] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [, setTick] = useState(0);                    // re-render relative times
-  const [handled, setHandled] = useState<Record<string, string>>(
-    () => { try { return JSON.parse(localStorage.getItem('ovHandled') || '{}'); } catch { return {}; } }
-  );
+  const [override, setOverride] = useState<Record<string, boolean>>({}); // optimistic done state
 
   const load = useCallback((silent = false) => {
     silent ? setRefreshing(true) : setLoading(true);
     getFunnel(activeCampaign ? { restaurant: activeCampaign.name } : undefined)
-      .then((r) => { setData(r.data); setError(false); })
+      .then((r) => { setData(r.data); setError(false); setOverride({}); }) // server is truth after refetch
       .catch(() => setError(true))
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, [activeCampaign]);
@@ -169,19 +167,21 @@ export default function Overview() {
     const b = setInterval(() => setTick((t) => t + 1), 60000);
     return () => { clearInterval(a); clearInterval(b); };
   }, [load]);
-  useEffect(() => { localStorage.setItem('ovHandled', JSON.stringify(handled)); }, [handled]);
 
-  const isHandled = (it: any) => !!it.chat_id && handled[it.chat_id] === (it.last_modified || '1');
-  const toggle = (it: any) => setHandled((h) => {
-    const next = { ...h };
-    if (isHandled(it)) delete next[it.chat_id];
-    else next[it.chat_id] = it.last_modified || '1';
-    return next;
-  });
+  // done = optimistic override if set, else the server's action_done (written back to Feishu)
+  const isHandled = (it: any) => (it.chat_id in override ? override[it.chat_id] : !!it.action_done);
+  // mark a step done/undone → writes the Feishu action field for the whole team
+  const mark = (it: any, action: string) => {
+    const next = !isHandled(it);
+    setOverride((o) => ({ ...o, [it.chat_id]: next }));
+    markFunnelAction(it.chat_id, action, next).catch(() => {
+      setOverride((o) => ({ ...o, [it.chat_id]: !next }));
+      showToast('回写飞书失败，已撤销', 'error');
+    });
+  };
   const matchQ = (it: any) => !q || (it.name || '').toLowerCase().includes(q.toLowerCase()) || (it.handle || '').toLowerCase().includes(q.toLowerCase());
   const matchChan = (it: any) => chan === 'all' || it.channel === chan;
   // handled rows STAY visible (crossed out) and sink to the bottom — never vanish.
-  // The toggle only optionally hides them to declutter.
   const view = (items: any[]) => {
     const arr = (items || []).filter(matchQ).filter(matchChan);
     const visible = hideDone ? arr.filter((it) => !isHandled(it)) : arr;
@@ -216,7 +216,7 @@ export default function Overview() {
   const schedUrgent = sched.filter((x: any) => x.is_today || x.is_tomorrow);
   const schedRest = sched.filter((x: any) => !x.is_today && !x.is_tomorrow);
   const todoCount = liveCount(t.reply_needed) + liveCount(t.set_time) + liveCount(t.scheduled_msg) + liveCount(t.to_post) + liveCount(t.unpaid);
-  const doneCount = Object.keys(handled).length;
+  const doneCount = [...t.reply_needed, ...(t.set_time || []), ...t.scheduled_msg, ...t.to_post, ...t.unpaid].filter(isHandled).length;
   const onView = (x: any) => { setPreview(x); setCopied(false); };
 
   return (
@@ -316,27 +316,27 @@ export default function Overview() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <TodoCard step="①" icon={<MessageSquareReply size={16} />} title="待回复" sub="博主发来消息，球在我方 → 去回他" count={liveCount(t.reply_needed)} empty={view(t.reply_needed).length === 0} accent="text-blue-600" headerBg="bg-blue-50" badge="bg-blue-100 text-blue-700">
-            {view(t.reply_needed).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} />)}
+            {view(t.reply_needed).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "reply")} />)}
           </TodoCard>
 
           <TodoCard step="②" icon={<CalendarPlus size={16} />} title="待定到店时间" sub="已谈成，需我方敲定到店时间" count={liveCount(t.set_time)} empty={view(t.set_time).length === 0} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
-            {view(t.set_time).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} />)}
+            {view(t.set_time).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "settime")} />)}
           </TodoCard>
 
           <TodoCard step="③" icon={<Send size={16} />} title="发邀约确认" sub="已排期，发确认消息给博主（先看再复制）" count={liveCount(t.scheduled_msg)} empty={sched.length === 0} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
-            {schedUrgent.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => toggle(it)} />)}
+            {schedUrgent.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => mark(it, "invite")} />)}
             {schedUrgent.length > 0 && schedRest.length > 0 && (
               <div className="px-4 py-1 text-[11px] font-medium text-slate-400 bg-slate-50 border-t border-slate-100">其余已排期（待确认）</div>
             )}
-            {schedRest.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => toggle(it)} />)}
+            {schedRest.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => mark(it, "invite")} />)}
           </TodoCard>
 
           <TodoCard step="④" icon={<Clapperboard size={16} />} title="催发帖" sub="已到店，还没发帖 → 去催" count={liveCount(t.to_post)} empty={view(t.to_post).length === 0} accent="text-violet-600" headerBg="bg-violet-50" badge="bg-violet-100 text-violet-700">
-            {view(t.to_post).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} right={<span className="text-[11px] text-slate-400">到店 {it.visit_date || '?'}</span>} />)}
+            {view(t.to_post).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "chase")} right={<span className="text-[11px] text-slate-400">到店 {it.visit_date || '?'}</span>} />)}
           </TodoCard>
 
           <TodoCard step="⑤" icon={<DollarSign size={16} />} title={`付款 · 共 $${data.payments.unpaid_total || 0}`} sub="已发帖，现金报酬待付" count={liveCount(t.unpaid)} empty={view(t.unpaid).length === 0} accent="text-emerald-600" headerBg="bg-emerald-50" badge="bg-emerald-100 text-emerald-700">
-            {view(t.unpaid).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} right={<span className="text-red-500 font-medium text-sm">${it.amount}</span>} />)}
+            {view(t.unpaid).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "pay")} right={<span className="text-red-500 font-medium text-sm">${it.amount}</span>} />)}
           </TodoCard>
         </div>
       </section>

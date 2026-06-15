@@ -68,6 +68,8 @@ export const getProfileBreakdown = (params?: Record<string, string>) => api.get<
 
 // Funnel (Overview)
 export const getFunnel = (params?: Record<string, string>) => api.get<any>('/funnel', { params });
+export const markFunnelAction = (chat_id: string, action: string, done: boolean) =>
+  api.post('/funnel/action', { chat_id, action, done });
 
 // Long-term
 export const getLongTermPartners = () => api.get<any[]>('/longterm');
