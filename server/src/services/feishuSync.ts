@@ -240,6 +240,8 @@ function ensureFunnelTable() {
       visit_time TEXT,
       pub_date TEXT,
       post_url TEXT,
+      post_type TEXT,
+      owner TEXT,
       scheduled_message TEXT,
       last_modified TEXT,
       feishu_url TEXT,
@@ -254,6 +256,8 @@ function ensureFunnelTable() {
   if (!cols.includes('visit_time')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN visit_time TEXT`);
   if (!cols.includes('last_modified')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN last_modified TEXT`);
   if (!cols.includes('feishu_url')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN feishu_url TEXT`);
+  if (!cols.includes('post_type')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN post_type TEXT`);
+  if (!cols.includes('owner')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN owner TEXT`);
 }
 
 export type SyncResult = {
@@ -348,18 +352,20 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
       const channelRaw = cellText(f['平台']).trim();
       const channel = channelRaw === 'IG' ? 'IG' : channelRaw === 'Email' ? '邮件' : (channelRaw || 'IG');
       const feishuUrl = rec.shared_url || '';
+      const postType = cellText(f['帖子类型']).trim();
+      const owner = cellText(f['负责人']).trim();
 
       // --- funnel mirror: EVERY row (full funnel, this is the Overview's source) ---
       seenFunnelChatIds.add(chatId);
       db.prepare(
-        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, pub_date, post_url, scheduled_message, last_modified, feishu_url, paid, amount, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, pub_date, post_url, post_type, owner, scheduled_message, last_modified, feishu_url, paid, amount, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(chat_id) DO UPDATE SET channel=excluded.channel, name=excluded.name, handle=excluded.handle, restaurant=excluded.restaurant,
            status_raw=excluded.status_raw, bucket=excluded.bucket, note=excluded.note, visit_date=excluded.visit_date,
-           visit_time=excluded.visit_time, pub_date=excluded.pub_date, post_url=excluded.post_url,
+           visit_time=excluded.visit_time, pub_date=excluded.pub_date, post_url=excluded.post_url, post_type=excluded.post_type, owner=excluded.owner,
            scheduled_message=excluded.scheduled_message, last_modified=excluded.last_modified, feishu_url=excluded.feishu_url,
            paid=excluded.paid, amount=excluded.amount, updated_at=excluded.updated_at`
-      ).run(chatId, channel, name, username, restaurant, status, bucket, notes, visitDate, visitTime, pubDate, postUrl, schedMsg, lastModified, feishuUrl, paid, cash, now);
+      ).run(chatId, channel, name, username, restaurant, status, bucket, notes, visitDate, visitTime, pubDate, postUrl, postType, owner, schedMsg, lastModified, feishuUrl, paid, cash, now);
       funnelCounts[bucket] = (funnelCounts[bucket] || 0) + 1;
 
       // --- downstream CRM (kanban/payment) only for confirmed+ rows ---

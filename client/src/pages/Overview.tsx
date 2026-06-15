@@ -44,6 +44,12 @@ function Chan({ c }: { c: string }) {
   return <span className={`badge text-[10px] px-1.5 py-0 ${map[c] || 'bg-slate-100 text-slate-500'}`}>{c}</span>;
 }
 
+// who on our team is handling this (from the Feishu 负责人 field)
+function Owner({ name }: { name: string }) {
+  if (!name) return null;
+  return <span className="badge text-[10px] px-1.5 py-0 bg-slate-100 text-slate-600">👤{name}</span>;
+}
+
 function RowLinks({ it }: { it: any }) {
   return (
     <span className="flex items-center gap-1.5 flex-shrink-0">
@@ -79,7 +85,7 @@ function SchedRow({ it, onView, done, onToggle }: any) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`font-medium text-slate-800 truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
-          <Chan c={it.channel} />
+          <Chan c={it.channel} /><Owner name={it.owner} />
           {tag && <span className={`badge ${tag.c}`}>{tag.t}</span>}
           <RowLinks it={it} />
         </div>
@@ -103,7 +109,7 @@ function ActionRow({ it, right, done, onToggle }: any) {
       <div className="flex items-center gap-2 flex-wrap">
         <Done on={done} onClick={onToggle} />
         <span className={`font-medium text-slate-800 text-sm truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
-        <Chan c={it.channel} />
+        <Chan c={it.channel} /><Owner name={it.owner} />
         <RowLinks it={it} />
         <span className="ml-auto flex items-center gap-2">{right}<Ago iso={it.last_modified} /></span>
       </div>
@@ -138,6 +144,7 @@ export default function Overview() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [showPub, setShowPub] = useState(false);     // 已发布成果 reference view
   const [showDone, setShowDone] = useState(false);   // reveal already-handled rows
   const [q, setQ] = useState('');
   const [chan, setChan] = useState('all');            // channel focus: all / IG / 邮件
@@ -327,6 +334,34 @@ export default function Overview() {
             {view(t.unpaid).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => toggle(it)} right={<span className="text-red-500 font-medium text-sm">${it.amount}</span>} />)}
           </TodoCard>
         </div>
+      </section>
+
+      {/* 已发布成果 (reference) — finished posts with reel/story type + link */}
+      <section>
+        <button onClick={() => setShowPub((v) => !v)} className="flex items-center gap-2 text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2 hover:text-slate-600">
+          <ChevronDown size={13} className={`transition-transform ${showPub ? '' : '-rotate-90'}`} />
+          已发布成果 {data.published?.length || 0}
+        </button>
+        {showPub && (
+          <div className="card divide-y divide-slate-100">
+            {(data.published || []).length === 0 && <div className="px-4 py-4 text-center text-xs text-slate-300">暂无</div>}
+            {(data.published || []).map((it: any, i: number) => {
+              const pc: Record<string, string> = { reel: 'bg-pink-100 text-pink-700', story: 'bg-amber-100 text-amber-700', post: 'bg-slate-100 text-slate-600' };
+              return (
+                <div key={i} className="px-4 py-2 flex items-center gap-2 text-sm flex-wrap">
+                  <span className="font-medium text-slate-800 truncate">{it.name}</span>
+                  <Chan c={it.channel} /><Owner name={it.owner} />
+                  {it.post_type && <span className={`badge text-[10px] px-1.5 py-0 ${pc[it.post_type] || 'bg-slate-100 text-slate-600'}`}>{it.post_type}</span>}
+                  <span className="text-xs text-slate-400">{it.pub_date || ''}</span>
+                  <span className="ml-auto flex items-center gap-2">
+                    {it.post_url && <a href={it.post_url} target="_blank" rel="noreferrer" className="text-[11px] text-pink-600 hover:text-pink-800 border border-pink-100 bg-pink-50 rounded px-1.5 py-0.5">帖子↗</a>}
+                    {it.feishu_url && <a href={it.feishu_url} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 border border-blue-100 bg-blue-50 rounded px-1.5 py-0.5">飞书↗</a>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* reference: 分店概览 */}

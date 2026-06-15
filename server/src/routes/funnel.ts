@@ -12,8 +12,8 @@ const item = (r: any) => ({
   chat_id: r.chat_id,
   name: r.name, handle: r.handle, restaurant: r.restaurant, status: r.status_raw, channel: r.channel,
   note: r.note, visit_date: r.visit_date, visit_time: r.visit_time, pub_date: r.pub_date,
-  post_url: r.post_url, scheduled_message: r.scheduled_message, last_modified: r.last_modified,
-  feishu_url: r.feishu_url, paid: !!r.paid, amount: r.amount,
+  post_url: r.post_url, post_type: r.post_type, owner: r.owner, scheduled_message: r.scheduled_message,
+  last_modified: r.last_modified, feishu_url: r.feishu_url, paid: !!r.paid, amount: r.amount,
 });
 
 /**
@@ -63,6 +63,9 @@ router.get('/', (req, res) => {
     unpaid: rows.filter((r) => r.amount > 0 && !r.paid).sort(byStale).map(item),
   };
 
+  // published deliverables (reference) — the finished posts, with link + reel/story type
+  const published = rows.filter((r) => r.bucket === 'published').sort((a, b) => (b.pub_date || '').localeCompare(a.pub_date || '')).map(item);
+
   const owed = rows.filter((r) => r.amount > 0);
   const payments = {
     paid: owed.filter((r) => r.paid).length,
@@ -103,7 +106,7 @@ router.get('/', (req, res) => {
 
   res.json({
     ready: true, order: FUNNEL_ORDER, labels: FUNNEL_LABELS,
-    total: rows.length, metrics, declined, todos, payments, byRestaurant, unassigned, restaurants, lastSync, funnelBar,
+    total: rows.length, metrics, declined, todos, published, payments, byRestaurant, unassigned, restaurants, lastSync, funnelBar,
   });
 });
 
