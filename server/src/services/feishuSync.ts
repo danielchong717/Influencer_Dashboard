@@ -19,6 +19,9 @@ const APP_ID = process.env.FEISHU_APP_ID || '';
 const APP_SECRET = process.env.FEISHU_APP_SECRET || '';
 const BITABLE = process.env.FEISHU_BITABLE_APP_TOKEN || '';
 const VISITS_TABLE = process.env.FEISHU_VISITS_TABLE_ID || '';
+// Optional 2nd source: the Gmail-channel outreach table (separate base). If unset, email is skipped.
+const EMAIL_BASE = process.env.FEISHU_EMAIL_BASE_TOKEN || '';
+const EMAIL_TABLE = process.env.FEISHU_EMAIL_TABLE_ID || '';
 
 // Feishu 状态 → dashboard pipeline.stage. Only these statuses are downstream enough to
 // belong on the command-center kanban; everything else stays in Feishu's top-of-funnel.
@@ -59,11 +62,11 @@ type FeishuRecord = { record_id: string; fields: Record<string, any>; last_modif
  * hand-built deep links drop params on mobile). batch_get takes ≤100 ids per call.
  * Note: these only open without a login if the base's sharing is set to "anyone with link".
  */
-async function fetchSharedUrls(token: string, ids: string[]): Promise<Record<string, string>> {
+async function fetchSharedUrls(token: string, ids: string[], base: string = BITABLE, table: string = VISITS_TABLE): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
-    const url = `${BASE}/open-apis/bitable/v1/apps/${BITABLE}/tables/${VISITS_TABLE}/records/batch_get`;
+    const url = `${BASE}/open-apis/bitable/v1/apps/${base}/tables/${table}/records/batch_get`;
     const r = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -90,13 +93,13 @@ async function tenantToken(): Promise<string> {
   return d.tenant_access_token;
 }
 
-async function listRecords(token: string, table: string): Promise<FeishuRecord[]> {
+async function listRecords(token: string, table: string, base: string = BITABLE): Promise<FeishuRecord[]> {
   const out: FeishuRecord[] = [];
   let pageToken: string | undefined;
   do {
     const q = new URLSearchParams({ page_size: '500', automatic_fields: 'true' }); // need last_modified_time
     if (pageToken) q.set('page_token', pageToken);
-    const url = `${BASE}/open-apis/bitable/v1/apps/${BITABLE}/tables/${table}/records?${q}`;
+    const url = `${BASE}/open-apis/bitable/v1/apps/${base}/tables/${table}/records?${q}`;
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     const d: any = await r.json();
     if (d.code !== 0) throw new Error(`read table failed ${table}: ${JSON.stringify(d)}`);
@@ -104,6 +107,50 @@ async function listRecords(token: string, table: string): Promise<FeishuRecord[]
     pageToken = d.data?.has_more ? d.data.page_token : undefined;
   } while (pageToken);
   return out;
+}
+
+// A normalized funnel row from the email channel, shaped to upsert into ig_funnel.
+type FunnelEntry = {
+  chat_id: string; channel: string; name: string; handle: string; restaurant: string;
+  status_raw: string; bucket: string; note: string; last_modified: string | null; feishu_url: string;
+};
+
+/**
+ * Gmail-channel actionable rows. The email table's `Group` is the clean status; map the two
+ * actionable groups to the SAME Chinese statuses the route already filters on, so they merge
+ * into 待回复 / 待定时间 automatically. Scheduled email visits are excluded — they already
+ * live in 到店排期. Returns [] if the email base isn't configured.
+ */
+async function fetchEmailEntries(token: string): Promise<FunnelEntry[]> {
+  if (!EMAIL_BASE || !EMAIL_TABLE) return [];
+  const ACTION: Record<string, string> = { 'Reply needed': '等我们回', 'Ready to schedule': '已敲定待约时间' };
+  let rows: FeishuRecord[];
+  try {
+    rows = await listRecords(token, EMAIL_TABLE, EMAIL_BASE);
+  } catch {
+    return []; // email base is best-effort; never break the IG sync over it
+  }
+  const actionable = rows.filter((r) => {
+    const g = cellText(r.fields['Group']).trim();
+    return ACTION[g] && cellText(r.fields['Scheduled']).trim().toLowerCase() !== 'yes';
+  });
+  const urls = await fetchSharedUrls(token, actionable.map((r) => r.record_id), EMAIL_BASE, EMAIL_TABLE);
+  return actionable.map((r) => {
+    const f = r.fields;
+    const g = cellText(f['Group']).trim();
+    return {
+      chat_id: 'em_' + r.record_id,
+      channel: '邮件',
+      name: (cellText(f['Name']).trim() || 'Unknown').slice(0, 100),
+      handle: '',
+      restaurant: cellText(f['Restaurant']).trim() || 'Unassigned',
+      status_raw: ACTION[g],
+      bucket: 'talking',
+      note: (cellText(f['Next Step']) || cellText(f['Status'])).slice(0, 1000),
+      last_modified: r.last_modified_time ? new Date(r.last_modified_time).toISOString() : null,
+      feishu_url: urls[r.record_id] || '',
+    };
+  });
 }
 
 /** Flatten a bitable cell (string | [{text}] | link-field [{text_arr}] | option {name}) to plain text. */
@@ -243,7 +290,7 @@ function reconcile(seenChatIds: Set<string>): number {
   return removed;
 }
 
-export function syncFromRecords(records: FeishuRecord[]): SyncResult {
+export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEntry[] = []): SyncResult {
   ensureChatIdColumn();
   ensureFunnelTable();
   const teamMemberId = ensureTeamMember();
@@ -381,6 +428,19 @@ export function syncFromRecords(records: FeishuRecord[]): SyncResult {
       byStage[stage] = (byStage[stage] || 0) + 1;
       imported++;
     }
+
+    // --- Gmail-channel actionable rows merged into the same funnel (待回复 / 待定时间) ---
+    for (const e of emailEntries) {
+      seenFunnelChatIds.add(e.chat_id);
+      db.prepare(
+        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, last_modified, feishu_url, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(chat_id) DO UPDATE SET channel=excluded.channel, name=excluded.name, restaurant=excluded.restaurant,
+           status_raw=excluded.status_raw, bucket=excluded.bucket, note=excluded.note,
+           last_modified=excluded.last_modified, feishu_url=excluded.feishu_url, updated_at=excluded.updated_at`
+      ).run(e.chat_id, e.channel, e.name, e.handle, e.restaurant, e.status_raw, e.bucket, e.note, e.last_modified, e.feishu_url, new Date().toISOString());
+      funnelCounts[e.bucket] = (funnelCounts[e.bucket] || 0) + 1;
+    }
   });
 
   tx(records);
@@ -405,5 +465,7 @@ export async function syncFromFeishu(): Promise<SyncResult> {
   const active = records.filter((r) => cellText(r.fields['状态']).trim());
   const urls = await fetchSharedUrls(token, active.map((r) => r.record_id));
   for (const r of records) r.shared_url = urls[r.record_id];
-  return syncFromRecords(records);
+  // pull the Gmail channel's actionable rows from the separate email base (best-effort)
+  const emailEntries = await fetchEmailEntries(token);
+  return syncFromRecords(records, emailEntries);
 }
