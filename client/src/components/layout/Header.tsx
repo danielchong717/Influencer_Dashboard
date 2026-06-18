@@ -4,6 +4,7 @@ import { useAppStore } from '../../store';
 import { getGmailAuthUrl, disconnectGmail, createCampaign, updateCampaign, deleteCampaign, getCampaigns } from '../../lib/api';
 
 const TAB_TITLES: Record<string, string> = {
+  overview: 'Overview',
   outreach: 'Outreach',
   pipeline: 'Pipeline',
   content: 'Content Schedule',

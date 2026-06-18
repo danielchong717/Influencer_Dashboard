@@ -19,7 +19,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   activeCampaign: null,
   campaigns: [],
-  activeTab: 'outreach',
+  activeTab: 'overview',
   gmailConnected: false,
   gmailEmail: null,
   toast: null,

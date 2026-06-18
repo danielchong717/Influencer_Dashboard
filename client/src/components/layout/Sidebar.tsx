@@ -1,13 +1,14 @@
 import React from 'react';
 import {
-  Mail, GitBranch, Calendar, CreditCard, BarChart3, Star, Zap
+  LayoutDashboard, Mail, GitBranch, Calendar, CreditCard, BarChart3, Star, Zap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAppStore } from '../../store';
 import type { TabId } from '../../types';
 
 const NAV_ITEMS: { id: TabId; label: string; icon: React.ReactNode; description: string }[] = [
-  { id: 'outreach', label: 'Outreach', icon: <Mail size={18} />, description: 'Email & follow-ups' },
+  { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={18} />, description: 'Influencer progress' },
+  { id: 'outreach', label: 'Outreach', icon: <Mail size={18} />, description: 'DM & follow-ups' },
   { id: 'pipeline', label: 'Pipeline', icon: <GitBranch size={18} />, description: 'Campaign stages' },
   { id: 'content', label: 'Content Schedule', icon: <Calendar size={18} />, description: 'Delivery & metrics' },
   { id: 'payment', label: 'Payment', icon: <CreditCard size={18} />, description: 'Invoices & status' },
