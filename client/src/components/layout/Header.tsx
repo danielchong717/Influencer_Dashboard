@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Wifi, WifiOff, ChevronDown, Bell, Plus, X, Check, Pencil, Trash2, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, ChevronDown, Bell, Plus, X, Check, Pencil, Trash2, RefreshCw, Menu } from 'lucide-react';
 import { useAppStore } from '../../store';
 import { getGmailAuthUrl, disconnectGmail, createCampaign, updateCampaign, deleteCampaign, getCampaigns } from '../../lib/api';
 
@@ -16,7 +16,7 @@ const TAB_TITLES: Record<string, string> = {
 const BLANK_CAMPAIGN = { name: '', start_date: '', end_date: '', budget: '', status: 'active' };
 
 export default function Header() {
-  const { activeTab, gmailConnected, gmailEmail, activeCampaign, campaigns, setActiveCampaign, setCampaigns, showToast, setGmailConnected } = useAppStore();
+  const { activeTab, gmailConnected, gmailEmail, activeCampaign, campaigns, setActiveCampaign, setCampaigns, showToast, setGmailConnected, setSidebarOpen } = useAppStore();
   const [showCampaignDrop, setShowCampaignDrop] = useState(false);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<any | null>(null);
@@ -87,6 +87,9 @@ export default function Header() {
   return (
     <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
       <div className="flex items-center gap-3">
+        <button onClick={() => setSidebarOpen(true)} className="md:hidden -ml-2 p-2 text-slate-500 hover:text-slate-800" aria-label="菜单">
+          <Menu size={20} />
+        </button>
         <h1 className="text-base font-semibold text-slate-900">{TAB_TITLES[activeTab]}</h1>
         {activeCampaign && (
           <span className="text-xs text-slate-400">/ {activeCampaign.name}</span>

@@ -38,6 +38,14 @@ const Ago = ({ iso }: { iso: string | null }) => {
   return <span className={`text-[11px] flex-shrink-0 ${a.cls}`}>{a.text}</span>;
 };
 
+// "6/19 周四" — compact weekday label for the rest-of-week agenda
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function dayLabel(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  return `${d.getMonth() + 1}/${d.getDate()} ${WEEKDAYS[d.getDay()]}`;
+}
+
 function Chan({ c }: { c: string }) {
   if (!c) return null;
   const map: Record<string, string> = { IG: 'bg-pink-100 text-pink-700', '邮件': 'bg-blue-100 text-blue-700', '小红书': 'bg-red-100 text-red-700' };
@@ -132,6 +140,43 @@ function TodoCard({ step, icon, title, sub, count, empty, accent, headerBg, badg
       </div>
       <div className="overflow-y-auto max-h-72">
         {empty ? <div className="px-4 py-6 text-center text-xs text-slate-300">清空了 ✓</div> : children}
+      </div>
+    </div>
+  );
+}
+
+// one arriving influencer: time · name · restaurant · channel · 飞书↗.
+// `showDay` adds the weekday (used in the rest-of-week column where dates vary).
+function ArrivalRow({ it, big, showDay }: { it: any; big?: boolean; showDay?: boolean }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 border-t border-white/40 first:border-t-0">
+      <span className={`font-mono font-bold flex-shrink-0 tabular-nums ${big ? 'text-base' : 'text-sm'} ${it.visit_time ? 'text-slate-900' : 'text-slate-400 text-xs'}`}>
+        {showDay ? <span className="text-[11px] text-slate-500 font-sans font-medium mr-1">{dayLabel(it.visit_date)}</span> : null}
+        {it.visit_time || '待定'}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`font-semibold text-slate-800 truncate ${big ? '' : 'text-sm'}`}>{it.name}</span>
+          <Chan c={it.channel} />
+        </div>
+        <div className="text-xs text-slate-500 truncate">🍴 {it.restaurant || '未分配'}{it.owner ? ` · ${it.owner}` : ''}</div>
+      </div>
+      <RowLinks it={it} />
+    </div>
+  );
+}
+
+function ArrivalDay({ title, items, accent, big, showDay }: any) {
+  return (
+    <div className={`rounded-xl border ${accent.border} ${accent.bg} flex flex-col overflow-hidden`}>
+      <div className={`px-3 py-2 flex items-center gap-2 ${accent.head}`}>
+        <span className={`font-bold text-sm ${accent.text}`}>{title}</span>
+        <span className={`badge ml-auto ${items.length > 0 ? accent.badge : 'bg-white/60 text-slate-400'}`}>{items.length}</span>
+      </div>
+      <div className="bg-white/50 max-h-64 overflow-y-auto">
+        {items.length === 0
+          ? <div className="px-3 py-4 text-center text-xs text-slate-400">无到店</div>
+          : items.map((it: any) => <ArrivalRow key={it.chat_id} it={it} big={big} showDay={showDay} />)}
       </div>
     </div>
   );
@@ -253,6 +298,30 @@ export default function Overview() {
           </button>
         </div>
       </div>
+
+      {/* 📅 本周到店 — the daily-glance agenda, FIRST thing on the board */}
+      {(() => {
+        const a = data.arrivals || { today: [], tomorrow: [], later: [] };
+        const totalWeek = a.today.length + a.tomorrow.length + a.later.length;
+        return (
+          <section>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <CalendarClock size={18} className="text-rose-600" />
+              <h2 className="text-base font-bold text-slate-900">本周到店</h2>
+              <span className="text-xs text-slate-400">谁来 · 几点 · 哪家店 — 每天先看这里</span>
+              <span className="badge ml-auto bg-rose-100 text-rose-700">{totalWeek} 位</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+              <ArrivalDay title="今天" items={a.today} big showDay={false}
+                accent={{ border: 'border-rose-200', bg: 'bg-rose-50', head: 'bg-rose-100/60', text: 'text-rose-700', badge: 'bg-rose-200 text-rose-800' }} />
+              <ArrivalDay title="明天" items={a.tomorrow} showDay={false}
+                accent={{ border: 'border-amber-200', bg: 'bg-amber-50', head: 'bg-amber-100/60', text: 'text-amber-700', badge: 'bg-amber-200 text-amber-800' }} />
+              <ArrivalDay title="本周剩余" items={a.later} showDay
+                accent={{ border: 'border-slate-200', bg: 'bg-slate-50', head: 'bg-slate-100/60', text: 'text-slate-600', badge: 'bg-slate-200 text-slate-700' }} />
+            </div>
+          </section>
+        );
+      })()}
 
       {/* 数据概览 — passive metrics + funnel, OFF by default */}
       {showStats && (

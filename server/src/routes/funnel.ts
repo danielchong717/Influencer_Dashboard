@@ -36,6 +36,7 @@ router.get('/', (req, res) => {
   if (!funnelExists()) {
     return res.json({ ready: false, order: FUNNEL_ORDER, labels: FUNNEL_LABELS,
       metrics: {}, total: 0, declined: 0, todos: { scheduled_msg: [], reply_needed: [], to_post: [], unpaid: [] },
+      arrivals: { week_end: null, today: [], tomorrow: [], later: [] },
       payments: { paid: 0, unpaid: 0 }, restaurants: [], byRestaurant: [] });
   }
 
@@ -52,9 +53,14 @@ router.get('/', (req, res) => {
     else if (metrics[r.bucket] !== undefined) metrics[r.bucket]++;
   }
 
-  // To-Do action queues (these need names + context)
-  const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  // To-Do action queues (these need names + context).
+  // Dates MUST be computed in NYC time: the user + all restaurants are in America/New_York,
+  // and visit_date is stored as a NYC calendar date. Using UTC (toISOString) makes "today"
+  // jump a day ahead every evening after ~8pm EDT, mis-filing tomorrow's visits as today's.
+  const TZ = 'America/New_York';
+  const ymd = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: TZ }); // → "YYYY-MM-DD" in NYC
+  const today = ymd(new Date());
+  const tomorrow = ymd(new Date(Date.now() + 86400000));
   const byVisit = (a: any, b: any) => (a.visit_date || '9999').localeCompare(b.visit_date || '9999');
   // stalest first: the row untouched longest floats to the top (most likely to be forgotten)
   const byStale = (a: any, b: any) => (a.last_modified || '9999').localeCompare(b.last_modified || '9999');
@@ -70,6 +76,23 @@ router.get('/', (req, res) => {
     set_time: rows.filter((r) => r.status_raw === '已敲定待约时间').sort(byStale).map(item),
     to_post: rows.filter((r) => ['已到店', '待发 reel', '待发帖'].includes(r.status_raw)).sort(byVisit).map(item),
     unpaid: rows.filter((r) => r.amount > 0 && !r.paid).sort(byStale).map(item),
+  };
+
+  // upcoming arrivals — the daily "who's coming in" agenda. Any conversation with a visit
+  // date set, from today through the end of this week (Sunday), that hasn't been declined.
+  // This is the FIRST thing the user checks each morning: today/tomorrow/rest-of-week.
+  const nowDow = new Date(new Date().toLocaleString('en-US', { timeZone: TZ })).getDay(); // 0=Sun…6=Sat in NYC
+  const daysToSun = nowDow === 0 ? 0 : 7 - nowDow;
+  const weekEnd = ymd(new Date(Date.now() + daysToSun * 86400000));
+  const byTime = (a: any, b: any) => byVisit(a, b) || (a.visit_time || '99:99').localeCompare(b.visit_time || '99:99');
+  const arrivalRows = rows
+    .filter((r) => r.visit_date && r.bucket !== 'declined' && r.visit_date >= today && r.visit_date <= weekEnd)
+    .sort(byTime);
+  const arrivals = {
+    week_end: weekEnd,
+    today: arrivalRows.filter((r) => r.visit_date === today).map(item),
+    tomorrow: arrivalRows.filter((r) => r.visit_date === tomorrow).map(item),
+    later: arrivalRows.filter((r) => r.visit_date > tomorrow).map(item),
   };
 
   // published deliverables (reference) — the finished posts, with link + reel/story type
@@ -115,7 +138,7 @@ router.get('/', (req, res) => {
 
   res.json({
     ready: true, order: FUNNEL_ORDER, labels: FUNNEL_LABELS,
-    total: rows.length, metrics, declined, todos, published, payments, byRestaurant, unassigned, restaurants, lastSync, funnelBar,
+    total: rows.length, metrics, declined, todos, arrivals, published, payments, byRestaurant, unassigned, restaurants, lastSync, funnelBar,
   });
 });
 
