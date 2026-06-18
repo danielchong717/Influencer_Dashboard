@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
-import { Wifi, WifiOff, ChevronDown, Bell, Plus, X, Check, Pencil, Trash2, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, ChevronDown, Bell, Plus, X, Check, Pencil, Trash2, RefreshCw, Menu } from 'lucide-react';
 import { useAppStore } from '../../store';
 import { getGmailAuthUrl, disconnectGmail, createCampaign, updateCampaign, deleteCampaign, getCampaigns } from '../../lib/api';
 
 const TAB_TITLES: Record<string, string> = {
-  outreach: 'Outreach',
-  pipeline: 'Pipeline',
-  content: 'Content Schedule',
-  payment: 'Payment',
-  report: 'Report',
-  longterm: 'Long-term Partners',
+  overview: '总览',
+  outreach: '触达',
+  pipeline: '流水线',
+  content: '内容排期',
+  payment: '付款',
+  report: '报表',
+  longterm: '长期合作',
 };
 
 const BLANK_CAMPAIGN = { name: '', start_date: '', end_date: '', budget: '', status: 'active' };
 
 export default function Header() {
-  const { activeTab, gmailConnected, gmailEmail, activeCampaign, campaigns, setActiveCampaign, setCampaigns, showToast, setGmailConnected } = useAppStore();
+  const { activeTab, gmailConnected, gmailEmail, activeCampaign, campaigns, setActiveCampaign, setCampaigns, showToast, setGmailConnected, setSidebarOpen } = useAppStore();
   const [showCampaignDrop, setShowCampaignDrop] = useState(false);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<any | null>(null);
@@ -86,6 +87,9 @@ export default function Header() {
   return (
     <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
       <div className="flex items-center gap-3">
+        <button onClick={() => setSidebarOpen(true)} className="md:hidden -ml-2 p-2 text-slate-500 hover:text-slate-800" aria-label="菜单">
+          <Menu size={20} />
+        </button>
         <h1 className="text-base font-semibold text-slate-900">{TAB_TITLES[activeTab]}</h1>
         {activeCampaign && (
           <span className="text-xs text-slate-400">/ {activeCampaign.name}</span>
@@ -99,38 +103,32 @@ export default function Header() {
             onClick={() => setShowCampaignDrop(!showCampaignDrop)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
           >
-            <span className="truncate max-w-[140px]">{activeCampaign?.name || 'Select Campaign'}</span>
+            <span className="truncate max-w-[140px]">{activeCampaign?.name || '全部餐厅'}</span>
             <ChevronDown size={14} />
           </button>
           {showCampaignDrop && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowCampaignDrop(false)} />
               <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 min-w-[220px]">
+                <button
+                  onClick={() => { setActiveCampaign(null); setShowCampaignDrop(false); }}
+                  className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-slate-50 border-b border-slate-100"
+                >
+                  <span className="truncate">全部餐厅 / All</span>
+                  {!activeCampaign && <Check size={12} className="text-blue-600 shrink-0" />}
+                </button>
+                {/* Read-only mirror: campaigns mirror Feishu restaurants, so create/edit/delete
+                    are hidden here (local edits get overwritten on next sync). Select only. */}
                 {campaigns.map(c => (
-                  <div key={c.id} className="flex items-center group hover:bg-slate-50">
-                    <button
-                      onClick={() => { setActiveCampaign(c); setShowCampaignDrop(false); }}
-                      className="flex-1 px-3 py-2 text-sm text-left flex items-center gap-2"
-                    >
-                      <span className="truncate">{c.name}</span>
-                      {activeCampaign?.id === c.id && <Check size={12} className="text-blue-600 shrink-0" />}
-                    </button>
-                    <button onClick={() => openEditCampaign(c)} className="px-2 py-2 text-slate-300 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-all">
-                      <Pencil size={12} />
-                    </button>
-                    <button onClick={() => handleDeleteCampaign(c.id)} className="px-2 py-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                ))}
-                <div className="border-t border-slate-100 p-1">
                   <button
-                    onClick={openNewCampaign}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                    key={c.id}
+                    onClick={() => { setActiveCampaign(c); setShowCampaignDrop(false); }}
+                    className="w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-slate-50"
                   >
-                    <Plus size={14} /> New Campaign
+                    <span className="truncate">{c.name}</span>
+                    {activeCampaign?.id === c.id && <Check size={12} className="text-blue-600 shrink-0" />}
                   </button>
-                </div>
+                ))}
               </div>
             </>
           )}
@@ -141,9 +139,9 @@ export default function Header() {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs border border-green-200">
               <Wifi size={12} />
-              <span className="truncate max-w-[120px]">{gmailEmail || 'Gmail Connected'}</span>
+              <span className="truncate max-w-[120px]">{gmailEmail || '已连接 Gmail'}</span>
             </div>
-            <button onClick={handleDisconnect} className="text-xs text-slate-400 hover:text-red-500 transition-colors">Disconnect</button>
+            <button onClick={handleDisconnect} className="text-xs text-slate-400 hover:text-red-500 transition-colors">断开</button>
           </div>
         ) : (
           <button
@@ -151,7 +149,7 @@ export default function Header() {
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-200 hover:bg-blue-100 transition-colors"
           >
             <WifiOff size={12} />
-            Connect Gmail
+            连接 Gmail
           </button>
         )}
 

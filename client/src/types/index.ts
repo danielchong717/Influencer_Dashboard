@@ -226,4 +226,4 @@ export interface LongTermPartner {
   views_7d?: number;
 }
 
-export type TabId = 'outreach' | 'pipeline' | 'content' | 'payment' | 'report' | 'longterm';
+export type TabId = 'overview' | 'outreach' | 'pipeline' | 'content' | 'payment' | 'report' | 'longterm';

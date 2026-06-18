@@ -15,6 +15,7 @@ import reportRoutes from './routes/report';
 import longtermRoutes from './routes/longterm';
 import trackRoutes from './routes/track';
 import campaignRoutes from './routes/campaigns';
+import funnelRoutes from './routes/funnel';
 
 import db from './db';
 import seed from './db/seed';
@@ -40,6 +41,7 @@ app.use('/api/report', reportRoutes);
 app.use('/api/longterm', longtermRoutes);
 app.use('/api/track', trackRoutes);
 app.use('/api/campaigns', campaignRoutes);
+app.use('/api/funnel', funnelRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
