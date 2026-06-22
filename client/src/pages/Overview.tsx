@@ -1,11 +1,19 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, createContext, useContext } from 'react';
 import {
   Send, MessageSquareReply, Clapperboard, DollarSign, RefreshCw, Copy, Check,
-  ExternalLink, Store, CalendarClock, AlertTriangle, ListChecks, CalendarPlus, ChevronDown,
-  Eye, X, Search, CheckCircle2, Circle, RotateCcw, WifiOff,
+  Store, CalendarClock, AlertTriangle, ListChecks, CalendarPlus, ChevronDown,
+  Eye, X, Search, CheckCircle2, Circle, RotateCcw, WifiOff, Pencil, Lock,
 } from 'lucide-react';
-import { getFunnel, markFunnelAction } from '../lib/api';
+import { getFunnel, markFunnelAction, sendFunnelReply, resyncFunnel, editFunnelRow, resolveFunnelIssue } from '../lib/api';
 import { useAppStore } from '../store';
+
+// Lets any row's RowLinks open the edit modal without threading a callback through every
+// component. Overview provides it; openEdit(row) is null for rows that can't be edited.
+const EditCtx = createContext<((it: any) => void) | null>(null);
+
+// Sending real IG DMs is gated to a direct localhost browser (the server also enforces this).
+// On the public tunnel the send button is hidden — view/copy only.
+const IS_LOCAL = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
 // Each funnel stage owns ONE signature color, reused on metric card + funnel bar + accents.
 const METRIC_META: Record<string, { label: string; color: string; bg: string; bar: string }> = {
@@ -58,16 +66,45 @@ function Owner({ name }: { name: string }) {
   return <span className="badge text-[10px] px-1.5 py-0 bg-slate-100 text-slate-600">👤{name}</span>;
 }
 
+// Recover the IG handle when the structured field is empty: the AI often writes it into
+// the note ("@okkairi" or "账号名 lou.live.love") for new inbound that has no IG链接 yet.
+function deriveHandle(it: any): string {
+  if ((it.handle || '').trim()) return it.handle.trim();
+  const blob = `${it.name || ''} ${it.note || ''}`;
+  const at = blob.match(/@([A-Za-z0-9_.]{2,30})/);
+  if (at) return at[1];
+  const acct = (it.note || '').match(/账号名[\s:：]*([A-Za-z0-9_.]{2,30})/);
+  return acct ? acct[1] : '';
+}
+
+// the influencer's REAL IG @handle — the unambiguous account id. Display names collide
+// (there are 4 different "NYC Foodie"), so the handle is what tells you which account to
+// reply to. Shown as readable text + click-through to IG, so you never open Feishu to find it.
+function Handle({ it }: { it: any }) {
+  if (it.channel === '邮件') return null;            // email rows: identified by name + 邮件 badge
+  const h = deriveHandle(it);
+  if (!h) return <span className="text-[11px] text-slate-400 flex-shrink-0" title="IG 私信请求，回复后才会显示账号">@? 待回复显账号</span>;
+  return (
+    <a href={`https://instagram.com/${h}`} target="_blank" rel="noreferrer"
+       className="text-xs text-pink-600 hover:text-pink-700 font-medium flex-shrink-0">@{h}</a>
+  );
+}
+
 function RowLinks({ it }: { it: any }) {
+  const onEdit = useContext(EditCtx);
+  // email-base leads (em_*) have no visits-table record → not editable from the board
+  const canEdit = onEdit && !String(it.chat_id || '').startsWith('em_');
   return (
     <span className="flex items-center gap-1.5 flex-shrink-0">
       {it.feishu_url && (
         <a href={it.feishu_url} target="_blank" rel="noreferrer"
            className="text-[11px] text-blue-600 hover:text-blue-800 border border-blue-100 bg-blue-50 rounded px-1.5 py-0.5">飞书↗</a>
       )}
-      {it.handle && (
-        <a href={`https://instagram.com/${it.handle}`} target="_blank" rel="noreferrer"
-           className="text-pink-500 hover:text-pink-700" title={`@${it.handle}`}><ExternalLink size={13} /></a>
+      {canEdit && (
+        <button onClick={() => onEdit!(it)} title="改餐补/时间/状态（写回飞书）"
+          className="text-[11px] text-slate-500 hover:text-slate-800 border border-slate-200 bg-slate-50 rounded px-1.5 py-0.5 inline-flex items-center gap-0.5">
+          <Pencil size={10} />改
+        </button>
       )}
     </span>
   );
@@ -93,6 +130,7 @@ function SchedRow({ it, onView, done, onToggle }: any) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`font-medium text-slate-800 truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
+          <Handle it={it} />
           <Chan c={it.channel} /><Owner name={it.owner} />
           {tag && <span className={`badge ${tag.c}`}>{tag.t}</span>}
           <RowLinks it={it} />
@@ -111,15 +149,34 @@ function SchedRow({ it, onView, done, onToggle }: any) {
   );
 }
 
-function ActionRow({ it, right, done, onToggle }: any) {
+// "等3天" — how long the ball has sat in OUR court (since the influencer's last message).
+// The 待回复 list is sorted oldest-first, so the reddest badges float to the top.
+function Waited({ iso }: { iso: string | null }) {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return null;
+  const days = Math.floor(ms / 86400000), hrs = Math.floor(ms / 3600000);
+  const txt = days >= 1 ? `等${days}天` : `等${hrs}小时`;
+  const cls = days >= 3 ? 'bg-red-100 text-red-700' : days >= 1 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500';
+  return <span className={`badge text-[10px] px-1.5 py-0 ${cls}`} title={`对方最后消息 ${iso.slice(0, 10)}`}>{txt}</span>;
+}
+
+function ActionRow({ it, right, done, onToggle, onDraft, waiting }: any) {
   return (
     <div className={`px-4 py-2 border-t border-slate-100 ${done ? 'opacity-50' : ''}`}>
       <div className="flex items-center gap-2 flex-wrap">
         <Done on={done} onClick={onToggle} />
         <span className={`font-medium text-slate-800 text-sm truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
+        <Handle it={it} />
         <Chan c={it.channel} /><Owner name={it.owner} />
         <RowLinks it={it} />
-        <span className="ml-auto flex items-center gap-2">{right}<Ago iso={it.last_modified} /></span>
+        {onDraft && it.reply_draft && (
+          <button onClick={() => onDraft(it)}
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 flex-shrink-0">
+            <Eye size={11} /> 查看草稿
+          </button>
+        )}
+        <span className="ml-auto flex items-center gap-2">{right}{waiting ? <Waited iso={it.last_inbound || it.last_modified} /> : <Ago iso={it.last_modified} />}</span>
       </div>
       {it.note && <div className="text-xs text-slate-400 line-clamp-1 mt-0.5 pl-6">{it.note}</div>}
     </div>
@@ -157,6 +214,7 @@ function ArrivalRow({ it, big, showDay }: { it: any; big?: boolean; showDay?: bo
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className={`font-semibold text-slate-800 truncate ${big ? '' : 'text-sm'}`}>{it.name}</span>
+          <Handle it={it} />
           <Chan c={it.channel} />
         </div>
         <div className="text-xs text-slate-500 truncate">🍴 {it.restaurant || '未分配'}{it.owner ? ` · ${it.owner}` : ''}</div>
@@ -182,6 +240,158 @@ function ArrivalDay({ title, items, accent, big, showDay }: any) {
   );
 }
 
+// #3 in-board editing: change 餐补/Additional Payment/到店时间/状态 → writes straight to Feishu.
+// Only sends fields the user actually changed. AI won't clobber a human-set credit/time (resolve()
+// protects it); status can still be re-judged if a new message arrives (Phase 2 will lock it).
+function EditModal({ it, statusOptions, onClose, onSaved }: any) {
+  const { showToast } = useAppStore();
+  const [credit, setCredit] = useState(it.dining_credit || '');
+  const [addpay, setAddpay] = useState(it.add_pay_raw || '');
+  const [visit, setVisit] = useState(it.visit_raw || '');
+  const [status, setStatus] = useState(it.status || '');
+  const [locked, setLocked] = useState(!!it.status_locked);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const fields: Record<string, any> = {};
+    if (credit.trim() !== (it.dining_credit || '')) fields.dining_credit = credit.trim();
+    if (addpay.trim() !== (it.add_pay_raw || '')) fields.additional_payment = addpay.trim();
+    if (visit.trim() !== (it.visit_raw || '')) fields.visit_time = visit.trim();
+    if (status !== (it.status || '')) fields.status = status;
+    if (locked !== !!it.status_locked) fields.locked = locked;
+    if (!Object.keys(fields).length && !it._issueId) { onClose(); return; }
+    setSaving(true);
+    try {
+      if (Object.keys(fields).length) await editFunnelRow(it.chat_id, fields);
+      if (it._issueId) await resolveFunnelIssue(it._issueId);   // close the AI issue this edit resolves
+      showToast(it._issueId ? '已写回飞书并标记问题已解决' : '已写回飞书', 'success');
+      onSaved();
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || '写回失败', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <div className="font-semibold text-slate-900">编辑 · {it.name}</div>
+            <div className="text-xs text-slate-500">{it.restaurant || '未分配'} · 直接写回飞书</div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          {it._issueDetail && (
+            <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800">
+              ⚠️ AI 检出：{it._issueDetail}
+              {it.ai_value ? <div className="mt-0.5">建议值：<b>{it.ai_value}</b>{it.current_value ? `（当前：${it.current_value}）` : ''}</div> : null}
+              <div className="text-[11px] text-amber-600 mt-0.5">改完保存会自动把这条问题标记已解决</div>
+            </div>
+          )}
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">餐补 Dining Credit</span>
+            <input value={credit} onChange={(e) => setCredit(e.target.value)} placeholder="如 $80 (food only)"
+              className="input w-full mt-1 text-sm" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">额外现金 Additional Payment</span>
+            <input value={addpay} onChange={(e) => setAddpay(e.target.value)} placeholder="如 $35（无则留空）"
+              className="input w-full mt-1 text-sm" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">到店时间</span>
+            <input value={visit} onChange={(e) => setVisit(e.target.value)} placeholder="2026-06-20 6:00 PM"
+              className="input w-full mt-1 text-sm" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">状态</span>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="input w-full mt-1 text-sm">
+              {status && !statusOptions.includes(status) && <option value={status}>{status}</option>}
+              {statusOptions.map((s: string) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={locked} onChange={(e) => setLocked(e.target.checked)} className="rounded" />
+            <Lock size={12} className={locked ? 'text-amber-600' : 'text-slate-400'} />
+            <span className="text-xs text-slate-600">锁定状态 — AI 不再重判此对话{status !== (it.status || '') && !locked ? '（改了状态会自动锁）' : ''}</span>
+          </label>
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100">
+          {it.feishu_url && <a href={it.feishu_url} target="_blank" rel="noreferrer" className="btn-secondary">飞书打开 ↗</a>}
+          <button onClick={onClose} className="btn-secondary">取消</button>
+          <button onClick={save} disabled={saving} className="btn-primary disabled:opacity-50">{saving ? '保存中…' : '保存并写回飞书'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ⚠️ Issue section — ONLY exceptions that need a human decision (conflicts/errors/inconsistencies),
+// not routine workflow. Each row carries a one-click resolution that reuses the #3 write-back.
+const ISSUE_STYLE: Record<string, { dot: string; tag: string; label: string }> = {
+  error:    { dot: 'bg-red-500',    tag: 'bg-red-100 text-red-700',       label: '报错' },
+  conflict: { dot: 'bg-amber-500',  tag: 'bg-amber-100 text-amber-700',   label: '冲突' },
+  decision: { dot: 'bg-blue-500',   tag: 'bg-blue-100 text-blue-700',     label: '待决策' },
+  gap:      { dot: 'bg-slate-400',  tag: 'bg-slate-100 text-slate-600',   label: '缺口' },
+};
+function IssueSection({ issues, onEdit, onFix, onResolve, fixing, resolving }: any) {
+  return (
+    <div className="rounded-xl border border-amber-300 bg-amber-50/60 overflow-hidden">
+      <div className="px-4 py-2.5 flex items-center gap-2 bg-amber-100/70">
+        <AlertTriangle size={16} className="text-amber-600" />
+        <span className="font-bold text-sm text-amber-900">需要你处理</span>
+        <span className="text-[11px] text-amber-700">系统卡住 / 数据矛盾，需你拍板</span>
+        <span className="badge ml-auto bg-amber-200 text-amber-800">{issues.length}</span>
+      </div>
+      <div className="bg-white/60 divide-y divide-amber-100 max-h-72 overflow-y-auto">
+        {issues.map((it: any) => {
+          const s = ISSUE_STYLE[it.sev] || ISSUE_STYLE.gap;
+          return (
+            <div key={`${it.chat_id}-${it.issue}`} className="flex items-center gap-3 px-4 py-2.5">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot}`} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className={`badge ${s.tag}`}>{s.label}</span>
+                  <span className="font-semibold text-sm text-slate-800">{it.title}</span>
+                  <span className="text-xs text-slate-500">· {it.name}</span>
+                  <Chan c={it.channel} />
+                </div>
+                <div className="text-xs text-slate-500 truncate mt-0.5">{it.detail}</div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {it.feishu_url && (
+                  <a href={it.feishu_url} target="_blank" rel="noreferrer"
+                     className="text-[11px] text-blue-600 hover:text-blue-800 border border-blue-100 bg-blue-50 rounded px-1.5 py-0.5">飞书↗</a>
+                )}
+                {it.source === 'ai' ? (
+                  <>
+                    {!String(it.chat_id || '').startsWith('em_') && (
+                      <button onClick={() => onEdit({ ...it, _issueId: it.issue_id, _issueDetail: it.detail })}
+                        className="btn-secondary text-xs py-1 px-2.5 inline-flex items-center gap-1"><Pencil size={11} />去解决</button>
+                    )}
+                    <button onClick={() => onResolve(it.issue_id)} disabled={resolving === it.issue_id}
+                      className="btn-secondary text-xs py-1 px-2.5 disabled:opacity-50">{resolving === it.issue_id ? '…' : '已解决'}</button>
+                  </>
+                ) : it.issue === 'dirty_msg' ? (
+                  <button onClick={() => onFix(it)} disabled={fixing === it.chat_id}
+                    className="btn-primary text-xs py-1 px-2.5 disabled:opacity-50">{fixing === it.chat_id ? '修正中…' : '一键修'}</button>
+                ) : it.issue === 'pub_no_link' ? (
+                  it.feishu_url && <a href={it.feishu_url} target="_blank" rel="noreferrer" className="btn-secondary text-xs py-1 px-2.5">去补链接</a>
+                ) : (
+                  <button onClick={() => onEdit(it)} className="btn-secondary text-xs py-1 px-2.5 inline-flex items-center gap-1"><Pencil size={11} />去修</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function Overview() {
   const { showToast, activeCampaign } = useAppStore();
   const [data, setData] = useState<any>(null);
@@ -195,8 +405,13 @@ export default function Overview() {
   const [chan, setChan] = useState('all');            // channel focus: all / IG / 邮件
   const [preview, setPreview] = useState<any>(null);
   const [copied, setCopied] = useState(false);
+  const [draftText, setDraftText] = useState('');     // editable AI draft in the modal
+  const [sending, setSending] = useState(false);
   const [, setTick] = useState(0);                    // re-render relative times
   const [override, setOverride] = useState<Record<string, boolean>>({}); // optimistic done state
+  const [edit, setEdit] = useState<any>(null);        // #3: row being edited (餐补/时间/状态)
+  const [fixing, setFixing] = useState<string | null>(null);  // chat_id mid 一键修
+  const [resolving, setResolving] = useState<string | null>(null);  // issue_id mid 已解决
 
   const load = useCallback((silent = false) => {
     silent ? setRefreshing(true) : setLoading(true);
@@ -205,6 +420,34 @@ export default function Overview() {
       .catch(() => setError(true))
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, [activeCampaign]);
+
+  // Manual 刷新: pull Feishu → mirror NOW, then re-read. (Auto-refresh below stays a cheap
+  // mirror-only read — no point hammering the Feishu API every 3 min from every open tab.)
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    resyncFunnel()
+      .catch(() => showToast('拉取飞书失败，显示的是本地缓存', 'error'))
+      .finally(() => load(true));   // re-reads the now-updated mirror; clears the spinner
+  }, [load]);
+
+  // 文案脏 one-click: collapse ") (covers food only)" → ")" and write the cleaned message to Feishu.
+  const fixDirtyMsg = (it: any) => {
+    const cleaned = (it.scheduled_message || '').replace(/\)\s+\(covers food only\)/g, ')');
+    setFixing(it.chat_id);
+    editFunnelRow(it.chat_id, { scheduled_message: cleaned })
+      .then(() => { showToast('已修正文案并写回飞书', 'success'); load(true); })
+      .catch((e: any) => showToast(e?.response?.data?.error || '修正失败', 'error'))
+      .finally(() => setFixing(null));
+  };
+
+  // Phase 2: mark an AI-raised issue resolved (no field change — e.g. false alarm / handled in Feishu)
+  const resolveAiIssue = (issueId: string) => {
+    setResolving(issueId);
+    resolveFunnelIssue(issueId)
+      .then(() => { showToast('已标记问题已解决', 'success'); load(true); })
+      .catch((e: any) => showToast(e?.response?.data?.error || '操作失败', 'error'))
+      .finally(() => setResolving(null));
+  };
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {                                   // auto-refresh + live time
@@ -262,9 +505,30 @@ export default function Overview() {
   const schedRest = sched.filter((x: any) => !x.is_today && !x.is_tomorrow);
   const todoCount = liveCount(t.reply_needed) + liveCount(t.set_time) + liveCount(t.scheduled_msg) + liveCount(t.to_post) + liveCount(t.unpaid);
   const doneCount = [...t.reply_needed, ...(t.set_time || []), ...t.scheduled_msg, ...t.to_post, ...t.unpaid].filter(isHandled).length;
-  const onView = (x: any) => { setPreview(x); setCopied(false); };
+  const onView = (x: any) => { setPreview({ ...x, _text: x.scheduled_message, _kind: 'invite' }); setCopied(false); };
+  const onDraft = (x: any) => { setPreview({ ...x, _text: x.reply_draft, _kind: 'draft' }); setDraftText(x.reply_draft || ''); setCopied(false); };
+  // send the (possibly edited) draft as an IG DM via Unipile, then mark 已回复 and close.
+  const sendDraft = async () => {
+    if (!preview || !draftText.trim() || sending) return;
+    if (!confirm(`确认把这条消息发送到 IG 给 ${preview.name}？发送后不可撤回。`)) return;
+    setSending(true);
+    try {
+      await sendFunnelReply(preview.chat_id, draftText);
+      setOverride((o) => ({ ...o, [preview.chat_id]: true })); // optimistically leave the queue
+      showToast(`已发送给 ${preview.name}`, 'success');
+      setPreview(null);
+      load(true);
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || '发送失败', 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+  // can one-click send only for an IG draft, on a direct-localhost browser (server also guards)
+  const canSend = !!preview && preview._kind === 'draft' && IS_LOCAL && !String(preview.chat_id || '').startsWith('em_');
 
   return (
+    <EditCtx.Provider value={setEdit}>
     <div className="p-4 sm:p-6 space-y-5">
       {/* header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -293,11 +557,16 @@ export default function Overview() {
           <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => setShowStats((v) => !v)}>
             <ChevronDown size={13} className={`transition-transform ${showStats ? '' : '-rotate-90'}`} />数据
           </button>
-          <button className="btn-secondary flex items-center gap-1" onClick={() => load(true)}>
+          <button className="btn-secondary flex items-center gap-1" onClick={refresh} disabled={refreshing}>
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />刷新
           </button>
         </div>
       </div>
+
+      {/* ⚠️ 需要你处理 — exceptions needing a decision, pinned above everything */}
+      {data.issues?.length > 0 && (
+        <IssueSection issues={data.issues} onEdit={setEdit} onFix={fixDirtyMsg} onResolve={resolveAiIssue} fixing={fixing} resolving={resolving} />
+      )}
 
       {/* 📅 本周到店 — the daily-glance agenda, FIRST thing on the board */}
       {(() => {
@@ -307,8 +576,8 @@ export default function Overview() {
           <section>
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <CalendarClock size={18} className="text-rose-600" />
-              <h2 className="text-base font-bold text-slate-900">本周到店</h2>
-              <span className="text-xs text-slate-400">谁来 · 几点 · 哪家店 — 每天先看这里</span>
+              <h2 className="text-base font-bold text-slate-900">近期到店</h2>
+              <span className="text-xs text-slate-400">谁来 · 几点 · 哪家店 — 未来 7 天，每天先看这里</span>
               <span className="badge ml-auto bg-rose-100 text-rose-700">{totalWeek} 位</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
@@ -316,7 +585,7 @@ export default function Overview() {
                 accent={{ border: 'border-rose-200', bg: 'bg-rose-50', head: 'bg-rose-100/60', text: 'text-rose-700', badge: 'bg-rose-200 text-rose-800' }} />
               <ArrivalDay title="明天" items={a.tomorrow} showDay={false}
                 accent={{ border: 'border-amber-200', bg: 'bg-amber-50', head: 'bg-amber-100/60', text: 'text-amber-700', badge: 'bg-amber-200 text-amber-800' }} />
-              <ArrivalDay title="本周剩余" items={a.later} showDay
+              <ArrivalDay title="接下来" items={a.later} showDay
                 accent={{ border: 'border-slate-200', bg: 'bg-slate-50', head: 'bg-slate-100/60', text: 'text-slate-600', badge: 'bg-slate-200 text-slate-700' }} />
             </div>
           </section>
@@ -385,7 +654,7 @@ export default function Overview() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <TodoCard step="①" icon={<MessageSquareReply size={16} />} title="待回复" sub="博主发来消息，球在我方 → 去回他" count={liveCount(t.reply_needed)} empty={view(t.reply_needed).length === 0} accent="text-blue-600" headerBg="bg-blue-50" badge="bg-blue-100 text-blue-700">
-            {view(t.reply_needed).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "reply")} />)}
+            {view(t.reply_needed).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "reply")} onDraft={onDraft} waiting />)}
           </TodoCard>
 
           <TodoCard step="②" icon={<CalendarPlus size={16} />} title="待定到店时间" sub="已谈成，需我方敲定到店时间" count={liveCount(t.set_time)} empty={view(t.set_time).length === 0} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
@@ -463,25 +732,56 @@ export default function Overview() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
               <div>
-                <div className="font-semibold text-slate-900">{preview.name} 的邀约消息</div>
-                <div className="text-xs text-slate-500">{preview.visit_date} {preview.visit_time} · {preview.restaurant} · 确认无误再复制</div>
+                <div className="font-semibold text-slate-900">
+                  {preview._kind === 'draft' ? `回复 ${preview.name}（AI 草稿）` : `${preview.name} 的邀约消息`}
+                </div>
+                <div className="text-xs text-slate-500">
+                  {preview._kind === 'draft'
+                    ? `${preview.restaurant}${deriveHandle(preview) ? ' · @' + deriveHandle(preview) : ''} · ${canSend ? '可编辑后一键发送到 IG' : '编辑后复制，手动发送'}`
+                    : `${preview.visit_date} ${preview.visit_time} · ${preview.restaurant} · 确认无误再复制`}
+                </div>
               </div>
               <button onClick={() => setPreview(null)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
             </div>
-            <pre className="px-5 py-4 text-sm text-slate-700 whitespace-pre-wrap break-words max-h-[50vh] overflow-y-auto font-sans">{preview.scheduled_message}</pre>
+            {preview._kind === 'draft' ? (
+              <textarea
+                value={draftText}
+                onChange={(e) => setDraftText(e.target.value)}
+                className="w-full px-5 py-4 text-sm text-slate-700 break-words max-h-[50vh] min-h-[160px] overflow-y-auto font-sans resize-none focus:outline-none border-0"
+              />
+            ) : (
+              <pre className="px-5 py-4 text-sm text-slate-700 whitespace-pre-wrap break-words max-h-[50vh] overflow-y-auto font-sans">{preview._text}</pre>
+            )}
             <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100">
+              {preview._kind === 'draft' && deriveHandle(preview) && (
+                <a href={`https://instagram.com/${deriveHandle(preview)}`} target="_blank" rel="noreferrer" className="btn-secondary">去 IG 对话 ↗</a>
+              )}
               {preview.feishu_url && (
                 <a href={preview.feishu_url} target="_blank" rel="noreferrer" className="btn-secondary">飞书打开此行 ↗</a>
               )}
               <button
-                onClick={() => { navigator.clipboard.writeText(preview.scheduled_message || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-                className="btn-primary flex items-center gap-1.5">
-                {copied ? <Check size={14} /> : <Copy size={14} />}{copied ? '已复制' : '复制消息'}
+                onClick={() => { navigator.clipboard.writeText((preview._kind === 'draft' ? draftText : preview._text) || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+                className={`${canSend ? 'btn-secondary' : 'btn-primary'} flex items-center gap-1.5`}>
+                {copied ? <Check size={14} /> : <Copy size={14} />}{copied ? '已复制' : '复制'}
               </button>
+              {canSend && (
+                <button
+                  onClick={sendDraft}
+                  disabled={sending || !draftText.trim()}
+                  className="btn-primary flex items-center gap-1.5 disabled:opacity-50">
+                  <Send size={14} />{sending ? '发送中…' : '发送到 IG'}
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
     </div>
+    {edit && (
+      <EditModal it={edit} statusOptions={data.statuses || []}
+        onClose={() => setEdit(null)}
+        onSaved={() => { setEdit(null); load(true); }} />
+    )}
+    </EditCtx.Provider>
   );
 }

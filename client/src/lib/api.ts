@@ -70,6 +70,17 @@ export const getProfileBreakdown = (params?: Record<string, string>) => api.get<
 export const getFunnel = (params?: Record<string, string>) => api.get<any>('/funnel', { params });
 export const markFunnelAction = (chat_id: string, action: string, done: boolean) =>
   api.post('/funnel/action', { chat_id, action, done });
+// send the approved reply as an IG DM (localhost-only — server rejects via the public tunnel)
+export const sendFunnelReply = (chat_id: string, text: string) =>
+  api.post('/funnel/send', { chat_id, text });
+// pull the latest from Feishu into the local mirror NOW (vs waiting for the hourly sync)
+export const resyncFunnel = () => api.post<any>('/funnel/resync');
+// #3: edit a row's structured fields (price/time/status) → written straight to Feishu
+export const editFunnelRow = (chat_id: string, fields: Record<string, string>) =>
+  api.post<any>('/funnel/edit', { chat_id, fields });
+// Phase 2: resolve an AI-raised issue (optionally applying a field fix first)
+export const resolveFunnelIssue = (issue_id: string, apply?: Record<string, string>) =>
+  api.post<any>('/funnel/issue/resolve', { issue_id, apply });
 
 // Long-term
 export const getLongTermPartners = () => api.get<any[]>('/longterm');

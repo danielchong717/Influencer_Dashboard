@@ -16,6 +16,9 @@ const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+// on-demand "refresh = live Feishu pull" can race the hourly launchd sync (separate process,
+// same db). WAL + a busy timeout lets the writer wait briefly instead of throwing SQLITE_BUSY.
+db.pragma('busy_timeout = 5000');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS team_members (

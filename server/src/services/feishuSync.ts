@@ -22,6 +22,9 @@ const VISITS_TABLE = process.env.FEISHU_VISITS_TABLE_ID || '';
 // Optional 2nd source: the Gmail-channel outreach table (separate base). If unset, email is skipped.
 const EMAIL_BASE = process.env.FEISHU_EMAIL_BASE_TOKEN || '';
 const EMAIL_TABLE = process.env.FEISHU_EMAIL_TABLE_ID || '';
+// Phase 2: AI-raised conflicts table (same IG base). If unset, the AI-issues feature is simply off.
+const ISSUES_TABLE = process.env.FEISHU_ISSUES_TABLE_ID || '';
+const LOCK_FIELD = '人工锁定状态';  // checkbox on 到店排期 — human-set status the AI must not re-judge
 
 // Feishu 状态 → dashboard pipeline.stage. Only these statuses are downstream enough to
 // belong on the command-center kanban; everything else stays in Feishu's top-of-funnel.
@@ -252,11 +255,16 @@ function ensureFunnelTable() {
       note TEXT,
       visit_date TEXT,
       visit_time TEXT,
+      visit_raw TEXT,
+      dining_credit TEXT,
+      add_pay_raw TEXT,
       pub_date TEXT,
       post_url TEXT,
       post_type TEXT,
       owner TEXT,
       scheduled_message TEXT,
+      reply_draft TEXT,
+      last_inbound TEXT,
       last_modified TEXT,
       feishu_url TEXT,
       record_id TEXT,
@@ -276,6 +284,37 @@ function ensureFunnelTable() {
   if (!cols.includes('owner')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN owner TEXT`);
   if (!cols.includes('record_id')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN record_id TEXT`);
   if (!cols.includes('action_done')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN action_done INTEGER DEFAULT 0`);
+  // ① AI reply draft + ② influencer's last-inbound time (for "waiting X days" on 待回复)
+  if (!cols.includes('reply_draft')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN reply_draft TEXT`);
+  if (!cols.includes('last_inbound')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN last_inbound TEXT`);
+  // raw editable values (for #3 in-board editing: show current + round-trip writes)
+  if (!cols.includes('visit_raw')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN visit_raw TEXT`);
+  if (!cols.includes('dining_credit')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN dining_credit TEXT`);
+  if (!cols.includes('add_pay_raw')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN add_pay_raw TEXT`);
+  // Phase 2: whether a human locked this row's 状态 (AI won't re-judge it upstream)
+  if (!cols.includes('status_locked')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN status_locked INTEGER DEFAULT 0`);
+}
+
+// Phase 2: local mirror of the Feishu "Issues" table (AI-raised conflicts). Read-only cache,
+// refreshed by syncIssues(); the dashboard reads this so GET /api/funnel stays a cheap SQLite read.
+function ensureIssuesTable() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ig_issues (
+      record_id TEXT PRIMARY KEY,
+      chat_id TEXT,
+      name TEXT,
+      restaurant TEXT,
+      type TEXT,
+      sev TEXT,
+      title TEXT,
+      detail TEXT,
+      current_value TEXT,
+      ai_value TEXT,
+      status TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    )
+  `);
 }
 
 export type SyncResult = {
@@ -356,8 +395,13 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
       const pubDate = parseDate(f['发布日期']);
       const notes = cellText(f['notes']).slice(0, 1000);
       const schedMsg = cellText(f['Scheduled Message']).slice(0, 2000);
+      const replyDraft = cellText(f['回复草稿']).slice(0, 2000);   // ① AI-drafted reply (等我们回 only)
+      const lastInbound = cellText(f['对方最后消息时间']).trim();  // ② influencer's last message time
       const mealCredit = parseMoney(f['餐补']);
+      const diningCreditRaw = cellText(f['餐补']).trim();        // raw 餐补 for in-board editing
       const cash = parseMoney(f['Additional Payment']);
+      const addPayRaw = cellText(f['Additional Payment']).trim(); // raw Additional Payment
+      const statusLocked = f[LOCK_FIELD] === true ? 1 : 0;        // human-locked status (Phase 2)
       const payStatusRaw = cellText(f['支付状态']).trim();
       const paid = payStatusRaw.includes('已支付') ? 1 : 0;
       // 发布链接 is a newer field the team added; fall back to the profile url for published rows.
@@ -379,14 +423,16 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
       // --- funnel mirror: EVERY row (full funnel, this is the Overview's source) ---
       seenFunnelChatIds.add(chatId);
       db.prepare(
-        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, pub_date, post_url, post_type, owner, scheduled_message, last_modified, feishu_url, record_id, action_done, paid, amount, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO ig_funnel (chat_id, channel, name, handle, restaurant, status_raw, bucket, note, visit_date, visit_time, visit_raw, dining_credit, add_pay_raw, pub_date, post_url, post_type, owner, scheduled_message, reply_draft, last_inbound, last_modified, feishu_url, record_id, action_done, paid, amount, status_locked, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(chat_id) DO UPDATE SET channel=excluded.channel, name=excluded.name, handle=excluded.handle, restaurant=excluded.restaurant,
            status_raw=excluded.status_raw, bucket=excluded.bucket, note=excluded.note, visit_date=excluded.visit_date,
-           visit_time=excluded.visit_time, pub_date=excluded.pub_date, post_url=excluded.post_url, post_type=excluded.post_type, owner=excluded.owner,
-           scheduled_message=excluded.scheduled_message, last_modified=excluded.last_modified, feishu_url=excluded.feishu_url,
-           record_id=excluded.record_id, action_done=excluded.action_done, paid=excluded.paid, amount=excluded.amount, updated_at=excluded.updated_at`
-      ).run(chatId, channel, name, username, restaurant, status, bucket, notes, visitDate, visitTime, pubDate, postUrl, postType, owner, schedMsg, lastModified, feishuUrl, rec.record_id, actionDone, paid, cash, now);
+           visit_time=excluded.visit_time, visit_raw=excluded.visit_raw, dining_credit=excluded.dining_credit, add_pay_raw=excluded.add_pay_raw,
+           pub_date=excluded.pub_date, post_url=excluded.post_url, post_type=excluded.post_type, owner=excluded.owner,
+           scheduled_message=excluded.scheduled_message, reply_draft=excluded.reply_draft, last_inbound=excluded.last_inbound,
+           last_modified=excluded.last_modified, feishu_url=excluded.feishu_url,
+           record_id=excluded.record_id, action_done=excluded.action_done, paid=excluded.paid, amount=excluded.amount, status_locked=excluded.status_locked, updated_at=excluded.updated_at`
+      ).run(chatId, channel, name, username, restaurant, status, bucket, notes, visitDate, visitTime, visitRaw, diningCreditRaw, addPayRaw, pubDate, postUrl, postType, owner, schedMsg, replyDraft, lastInbound, lastModified, feishuUrl, rec.record_id, actionDone, paid, cash, statusLocked, now);
       funnelCounts[bucket] = (funnelCounts[bucket] || 0) + 1;
 
       // --- downstream CRM (kanban/payment) only for confirmed+ rows ---
@@ -484,8 +530,8 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
   return { scanned: records.length, imported, skipped, removed, funnel: funnelCounts, byStage, campaigns: [...campaignCache.keys()] };
 }
 
-async function updateRecord(token: string, recordId: string, fields: Record<string, any>): Promise<void> {
-  const url = `${BASE}/open-apis/bitable/v1/apps/${BITABLE}/tables/${VISITS_TABLE}/records/${recordId}`;
+async function updateRecordIn(token: string, table: string, recordId: string, fields: Record<string, any>): Promise<void> {
+  const url = `${BASE}/open-apis/bitable/v1/apps/${BITABLE}/tables/${table}/records/${recordId}`;
   const r = await fetch(url, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -494,6 +540,8 @@ async function updateRecord(token: string, recordId: string, fields: Record<stri
   const d: any = await r.json();
   if (d.code !== 0) throw new Error(`update record failed: ${JSON.stringify(d)}`);
 }
+const updateRecord = (token: string, recordId: string, fields: Record<string, any>) =>
+  updateRecordIn(token, VISITS_TABLE, recordId, fields);
 
 /**
  * Write a team-action back to Feishu (and the local mirror) — this is what makes the board
@@ -527,17 +575,138 @@ export async function markAction(chatId: string, action: string, done: boolean):
   }
 }
 
+// #3 in-board editing — let a human set structured fields (price/time/status) directly,
+// written straight to Feishu (the source of truth) so the AI doesn't have to reverse-engineer
+// them from the conversation later. resolve() in process.py/email-sync treats a value that no
+// longer matches the AI's last write as a manual override and won't clobber it → the edit sticks.
+// Whitelisted fields only; email-base leads (em_*) have no visits-table record → rejected.
+const EDITABLE_FIELDS: Record<string, string> = {
+  dining_credit: '餐补',
+  additional_payment: 'Additional Payment',
+  visit_time: '到店时间',          // free-text "YYYY-MM-DD H:MM AM/PM"
+  status: '状态',                  // single-select; UI only offers existing option names
+  scheduled_message: 'Scheduled Message',  // for the 文案脏 one-click fix (strip duplicate clause)
+  locked: LOCK_FIELD,              // boolean — Phase 2 status human-lock (AI won't re-judge)
+};
+export async function editRecordFields(
+  chatId: string, fields: Record<string, any>
+): Promise<{ ok: boolean; error?: string }> {
+  const row = db.prepare(`SELECT record_id FROM ig_funnel WHERE chat_id=?`).get(chatId) as any;
+  if (!row) return { ok: false, error: 'row not found' };
+  if (chatId.startsWith('em_') || !row.record_id) return { ok: false, error: '此行来自邮件表，暂不支持看板编辑' };
+  if (!BITABLE || !VISITS_TABLE) return { ok: false, error: '缺飞书配置' };
+  const feishuFields: Record<string, any> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    const col = EDITABLE_FIELDS[k];
+    if (!col) return { ok: false, error: `不允许编辑字段: ${k}` };
+    feishuFields[col] = k === 'locked' ? (v === true || v === 'true') : (typeof v === 'string' ? v.trim() : v);
+  }
+  // A human edit of any AI-managed field (status/credit/cash/time) = an explicit decision. The
+  // upstream process.py overwrites ALL of these on the IG channel every re-judge, so auto-lock the
+  // row (unless the caller passed `locked` explicitly, e.g. to unlock) → the AI hands off this row.
+  const AI_MANAGED = ['status', 'dining_credit', 'additional_payment', 'visit_time'];
+  if (AI_MANAGED.some((k) => k in fields) && !('locked' in fields)) feishuFields[LOCK_FIELD] = true;
+  if (!Object.keys(feishuFields).length) return { ok: false, error: '没有可写字段' };
+  try {
+    const token = await tenantToken();
+    await updateRecord(token, row.record_id, feishuFields);  // write Feishu = source of truth
+    // optimistic mirror update so the board shows it before the next resync confirms
+    const m: Record<string, any> = {};
+    if ('dining_credit' in fields) m.dining_credit = feishuFields['餐补'];
+    if ('additional_payment' in fields) { m.add_pay_raw = feishuFields['Additional Payment']; m.amount = parseMoney(feishuFields['Additional Payment']); }
+    if ('visit_time' in fields) {
+      const raw = String(feishuFields['到店时间'] || '');
+      m.visit_raw = raw; m.visit_date = parseDate(raw); m.visit_time = raw.replace(/^\s*\d{4}-\d{2}-\d{2}\s*/, '').trim();
+    }
+    if ('status' in fields) { m.status_raw = feishuFields['状态']; m.bucket = BUCKET_MAP[feishuFields['状态']] || 'unknown'; }
+    if ('scheduled_message' in fields) m.scheduled_message = feishuFields['Scheduled Message'];
+    if (LOCK_FIELD in feishuFields) m.status_locked = feishuFields[LOCK_FIELD] ? 1 : 0;
+    const keys = Object.keys(m);
+    if (keys.length) db.prepare(`UPDATE ig_funnel SET ${keys.map((c) => `${c}=?`).join(', ')} WHERE chat_id=?`)
+      .run(...keys.map((c) => m[c]), chatId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// Phase 2: refresh the local mirror of the Feishu "Issues" table (AI-raised conflicts).
+// FAIL-OPEN by design — callers wrap this in try/catch so a missing/empty Issues table never
+// breaks the main sync or the board.
+async function syncIssues(token: string): Promise<number> {
+  ensureIssuesTable();
+  if (!ISSUES_TABLE) return 0;   // feature simply off when not configured
+  const recs = await listRecords(token, ISSUES_TABLE);
+  const now = new Date().toISOString();
+  const seen = new Set<string>();
+  for (const r of recs) {
+    const f = r.fields;
+    seen.add(r.record_id);
+    db.prepare(
+      `INSERT INTO ig_issues (record_id, chat_id, name, restaurant, type, sev, title, detail, current_value, ai_value, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(record_id) DO UPDATE SET chat_id=excluded.chat_id, name=excluded.name, restaurant=excluded.restaurant,
+         type=excluded.type, sev=excluded.sev, title=excluded.title, detail=excluded.detail, current_value=excluded.current_value,
+         ai_value=excluded.ai_value, status=excluded.status, created_at=excluded.created_at, updated_at=excluded.updated_at`
+    ).run(r.record_id, cellText(f['会话ID']).trim(), cellText(f['博主']).trim(), cellText(f['餐厅']).trim(),
+      cellText(f['类型']).trim(), cellText(f['严重度']).trim() || 'conflict', cellText(f['标题']).trim(),
+      cellText(f['详情']).trim(), cellText(f['当前值']).trim(), cellText(f['AI建议值']).trim(),
+      cellText(f['状态']).trim() || 'open', cellText(f['创建时间']).trim(), now);
+  }
+  // prune issues deleted upstream
+  for (const row of db.prepare(`SELECT record_id FROM ig_issues`).all() as any[]) {
+    if (!seen.has(row.record_id)) db.prepare(`DELETE FROM ig_issues WHERE record_id=?`).run(row.record_id);
+  }
+  return recs.length;
+}
+
+// Resolve an AI-raised issue: optionally apply a fix to the visit row (reuses #3 write-back),
+// then mark the Feishu Issues row 状态=resolved so it leaves the queue for the whole team.
+export async function resolveIssue(issueId: string, apply?: Record<string, string>): Promise<{ ok: boolean; error?: string }> {
+  const row = db.prepare(`SELECT chat_id FROM ig_issues WHERE record_id=?`).get(issueId) as any;
+  if (!row) return { ok: false, error: 'issue not found' };
+  if (!ISSUES_TABLE) return { ok: false, error: 'issues table 未配置' };
+  try {
+    if (apply && Object.keys(apply).length && row.chat_id) {
+      const r = await editRecordFields(row.chat_id, apply);   // write the chosen value (also auto-locks)
+      if (!r.ok) return r;
+    } else if (row.chat_id && !String(row.chat_id).startsWith('em_')) {
+      // bare resolve ("已解决" with no change): lock the row so the upstream AI won't re-emit the
+      // same conflict next run — the human has taken ownership of this row.
+      await editRecordFields(row.chat_id, { locked: true }).catch(() => {});
+    }
+    const token = await tenantToken();
+    await updateRecordIn(token, ISSUES_TABLE, issueId, { 状态: 'resolved' });
+    db.prepare(`UPDATE ig_issues SET status='resolved' WHERE record_id=?`).run(issueId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function syncFromFeishu(): Promise<SyncResult> {
   if (!APP_ID || !BITABLE || !VISITS_TABLE) {
     throw new Error('Missing Feishu config — set FEISHU_APP_ID, FEISHU_BITABLE_APP_TOKEN, FEISHU_VISITS_TABLE_ID in .env (see .env.example)');
   }
   const token = await tenantToken();
   const records = await listRecords(token, VISITS_TABLE);
-  // attach public share links (only for rows that will land in the funnel — they have a 状态)
+  // attach public share links (only for rows that will land in the funnel — they have a 状态).
+  // Links are STABLE per record_id, so reuse the ones already in the mirror and only fetch for
+  // NEW records — turns a manual resync from a ~20s full refetch into a near-instant pull.
   const active = records.filter((r) => cellText(r.fields['状态']).trim());
-  const urls = await fetchSharedUrls(token, active.map((r) => r.record_id));
-  for (const r of records) r.shared_url = urls[r.record_id];
+  const cachedUrls: Record<string, string> = {};
+  try {
+    for (const row of db.prepare(`SELECT record_id, feishu_url FROM ig_funnel WHERE record_id IS NOT NULL AND feishu_url <> ''`).all() as any[]) {
+      cachedUrls[row.record_id] = row.feishu_url;
+    }
+  } catch { /* ig_funnel may not exist on the very first run */ }
+  const missing = active.filter((r) => !cachedUrls[r.record_id]).map((r) => r.record_id);
+  const fetched = missing.length ? await fetchSharedUrls(token, missing) : {};
+  for (const r of records) r.shared_url = cachedUrls[r.record_id] || fetched[r.record_id] || '';
   // pull the Gmail channel's actionable rows from the separate email base (best-effort)
   const emailEntries = await fetchEmailEntries(token);
-  return syncFromRecords(records, emailEntries);
+  const result = syncFromRecords(records, emailEntries);
+  // Phase 2: refresh AI-raised issues — FAIL-OPEN, never let it break the main sync.
+  try { await syncIssues(token); } catch (e) { console.error('[syncIssues] non-fatal:', e instanceof Error ? e.message : e); }
+  return result;
 }
