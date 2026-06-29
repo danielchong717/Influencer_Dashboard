@@ -1,69 +1,174 @@
 import React, { useEffect, useState } from 'react';
-import { Send, RefreshCw, Mail, Eye, MessageSquare, Check, X, Clock, Plus, Wifi, WifiOff, Pencil, Trash2 } from 'lucide-react';
-import { getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus, getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, updateInfluencer, deleteInfluencer, getGmailAuthUrl, disconnectGmail, getGmailStatus, updateEmailTemplate } from '../lib/api';
+import {
+  Send, RefreshCw, MessageSquare, Check, X, Clock, Plus, Pencil, Trash2,
+  Copy, CheckCheck, ExternalLink, Search, FileText, Filter, Link2Off,
+} from 'lucide-react';
+import {
+  getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus,
+  getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, updateInfluencer,
+  deleteInfluencer, updateEmailTemplate, createEmailTemplate, deleteEmailTemplate,
+  getInstagramStatus, getInstagramAuthUrl, disconnectInstagram, searchInstagramHashtags,
+} from '../lib/api';
 import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
 
 const PLATFORMS = ['TikTok', 'YouTube', 'Instagram', 'RedNote'];
-const BLANK_INF = { name: '', platform: 'TikTok', username: '', email: '', followers: '', category: '', country: '' };
-
+const BLANK_INF = { name: '', platform: 'Instagram', username: '', email: '', followers: '', avg_reel_views: '', category: '', country: '' };
 const STATUS_ORDER = ['pending', 'sent', 'opened', 'replied', 'confirmed'];
+const TEMPLATE_VARS = [
+  { var: '{{name}}', desc: 'First name, or @username if no full name given' },
+  { var: '{{username}}', desc: 'Handle without @' },
+  { var: '{{platform}}', desc: 'Platform (Instagram, TikTok, etc.)' },
+  { var: '{{sender_name}}', desc: 'Your name / team member name' },
+];
+
+function getPlatformUrl(platform: string, username: string): string {
+  if (!username) return '';
+  const handle = username.replace('@', '');
+  switch (platform) {
+    case 'Instagram': return `https://instagram.com/${handle}`;
+    case 'TikTok': return `https://tiktok.com/@${handle}`;
+    case 'YouTube': return `https://youtube.com/@${handle}`;
+    case 'RedNote': return `https://xiaohongshu.com/user/profile/${handle}`;
+    default: return `https://instagram.com/${handle}`;
+  }
+}
+
+// If influencer has a full name (first + last), use first name.
+// Otherwise fall back to @username (without @), or the single-word name.
+function getGreetingName(name: string, username: string): string {
+  const trimmed = (name || '').trim();
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return parts[0];
+  const handle = (username || '').replace('@', '');
+  return handle || trimmed || 'there';
+}
+
+function renderDM(body: string, name: string, username: string, platform: string, senderName: string): string {
+  const greeting = getGreetingName(name, username);
+  const handle = (username || '').replace('@', '') || name;
+  return (body || '')
+    .replace(/\{\{name\}\}/g, greeting)
+    .replace(/\{\{username\}\}/g, handle)
+    .replace(/\{\{platform\}\}/g, platform)
+    .replace(/\{\{sender_name\}\}/g, senderName || 'Our Team');
+}
 
 export default function Outreach() {
   const { activeCampaign, showToast } = useAppStore();
+  const [activeTab, setActiveTab] = useState<'outreach' | 'discover'>('outreach');
+
+  // ── Outreach tab ──
   const [records, setRecords] = useState<OutreachRecord[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
   const [templates, setTemplates] = useState<any[]>([]);
   const [followUps, setFollowUps] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
-  const [connectedMemberIds, setConnectedMemberIds] = useState<Set<string>>(new Set());
-  const [showSendModal, setShowSendModal] = useState(false);
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterMember, setFilterMember] = useState('');
+
+  // ── Add / edit influencer ──
   const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState(BLANK_INF);
+  const [addLoading, setAddLoading] = useState(false);
   const [editingInfluencer, setEditingInfluencer] = useState<any | null>(null);
   const [editForm, setEditForm] = useState(BLANK_INF);
   const [editLoading, setEditLoading] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
-  const [templateSaving, setTemplateSaving] = useState(false);
-  const [addForm, setAddForm] = useState(BLANK_INF);
-  const [addLoading, setAddLoading] = useState(false);
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterMember, setFilterMember] = useState('');
-  const [sendForm, setSendForm] = useState({ template_id: '', follow_up_days: 1, team_member_id: '' });
 
+  // ── Template manager ──
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
+  const [isNewTemplate, setIsNewTemplate] = useState(false);
+  const [templateSaving, setTemplateSaving] = useState(false);
+
+  // ── DM modal ──
+  const [showDmModal, setShowDmModal] = useState(false);
+  const [dmRecords, setDmRecords] = useState<any[]>([]);
+  const [sendForm, setSendForm] = useState({ template_id: '', follow_up_days: 3, team_member_id: '' });
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // ── Discover tab ──
+  const [discoverMinFollowers, setDiscoverMinFollowers] = useState(500);
+  const [discoverMaxFollowers, setDiscoverMaxFollowers] = useState(4000);
+  const [discoverMinViews, setDiscoverMinViews] = useState(20000);
+  const [discoverResults, setDiscoverResults] = useState<any[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverSelected, setDiscoverSelected] = useState<Set<string>>(new Set());
+  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [hashInput, setHashInput] = useState('');
+  const [igStatus, setIgStatus] = useState<{ configured: boolean; connected: boolean; username: string | null } | null>(null);
+  const [addingIg, setAddingIg] = useState<string | null>(null);
+
+  // ── Loaders ──
   const load = async () => {
     const params: Record<string, string> = {};
     if (activeCampaign) params.campaign_id = activeCampaign.id;
     if (filterStatus) params.status = filterStatus;
     if (filterMember) params.team_member_id = filterMember;
 
-    const [r, a, t, f, gs] = await Promise.all([
+    const [r, a, t, f] = await Promise.all([
       getOutreach(params),
       getOutreachAnalytics(activeCampaign ? { campaign_id: activeCampaign.id } : {}),
       getEmailTemplates(),
       getFollowUps(),
-      getGmailStatus(),
     ]);
     setRecords(r.data);
     setAnalytics(a.data);
     setTemplates(t.data);
     setFollowUps(f.data);
-    setConnectedMemberIds(new Set((gs.data.connectedMembers || []).map((m: any) => m.id)));
     if (t.data.length > 0 && !sendForm.template_id) {
       setSendForm(f => ({ ...f, template_id: t.data[0].id }));
     }
   };
 
-  const handleConnectGmail = async (memberId: string) => {
-    const res = await getGmailAuthUrl(memberId);
-    window.location.href = res.data.url;
+  const handleDiscover = async () => {
+    if (!hashtags.length) { showToast('Add at least one hashtag to search Instagram', 'info'); return; }
+    if (!igStatus?.connected) { showToast('Connect Instagram first', 'info'); return; }
+    setDiscoverLoading(true);
+    setDiscoverResults([]);
+    setDiscoverSelected(new Set());
+    try {
+      const res = await searchInstagramHashtags(hashtags, {
+        min_followers: discoverMinFollowers,
+        max_followers: discoverMaxFollowers,
+        min_avg_views: discoverMinViews,
+      });
+      setDiscoverResults(res.data as any[]);
+      if (!(res.data as any[]).length) showToast('No matching creators found — try different hashtags or broader criteria', 'info');
+    } catch (e: any) {
+      showToast(e.response?.data?.error || 'Search failed', 'error');
+    } finally {
+      setDiscoverLoading(false);
+    }
   };
 
-  const handleDisconnectGmail = async (memberId: string) => {
-    await disconnectGmail(memberId);
-    showToast('Gmail disconnected', 'info');
+  const addHashtag = (raw: string) => {
+    const tag = raw.replace(/^#/, '').trim().toLowerCase();
+    if (tag && !hashtags.includes(tag)) setHashtags(h => [...h, tag]);
+    setHashInput('');
+  };
+
+  useEffect(() => {
     load();
+    getInstagramStatus().then(r => setIgStatus(r.data)).catch(() => {});
+    // handle ?ig_connected=1 redirect
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ig_connected')) {
+      showToast('Instagram connected!', 'success');
+      window.history.replaceState({}, '', window.location.pathname);
+      getInstagramStatus().then(r => setIgStatus(r.data)).catch(() => {});
+    }
+  }, [activeCampaign, filterStatus, filterMember]);
+
+  // ── Outreach tab handlers ──
+  const toggleAll = () => {
+    if (selected.size === records.length) setSelected(new Set());
+    else setSelected(new Set(records.map(r => r.id)));
+  };
+  const toggleOne = (id: string) => {
+    setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   };
 
   const openEditInfluencer = (r: OutreachRecord) => {
@@ -74,6 +179,7 @@ export default function Outreach() {
       username: r.username || '',
       email: r.influencer_email || '',
       followers: String(r.followers || ''),
+      avg_reel_views: String((r as any).avg_reel_views || ''),
       category: (r as any).category || '',
       country: (r as any).country || '',
     });
@@ -83,11 +189,15 @@ export default function Outreach() {
     if (!editingInfluencer) return;
     setEditLoading(true);
     try {
-      await updateInfluencer(editingInfluencer.influencer_id, { ...editForm, followers: Number(editForm.followers) || 0 });
+      await updateInfluencer(editingInfluencer.influencer_id, {
+        ...editForm,
+        followers: Number(editForm.followers) || 0,
+        avg_reel_views: Number(editForm.avg_reel_views) || 0,
+      });
       showToast('Influencer updated', 'success');
       setEditingInfluencer(null);
       load();
-    } catch (err) {
+    } catch {
       showToast('Failed to update influencer', 'error');
     } finally {
       setEditLoading(false);
@@ -95,70 +205,13 @@ export default function Outreach() {
   };
 
   const handleDeleteInfluencer = async (influencerId: string, name: string) => {
-    if (!window.confirm(`Remove ${name} from the dashboard? This also deletes their outreach records.`)) return;
+    if (!window.confirm(`Remove ${name}? This also deletes their outreach records.`)) return;
     try {
       await deleteInfluencer(influencerId);
       showToast(`${name} removed`, 'info');
-      await load();
+      load();
     } catch {
       showToast('Failed to delete influencer', 'error');
-    }
-  };
-
-  const handleSaveTemplate = async () => {
-    if (!editingTemplate) return;
-    setTemplateSaving(true);
-    try {
-      await updateEmailTemplate(editingTemplate.id, {
-        name: editingTemplate.name,
-        subject: editingTemplate.subject,
-        body: editingTemplate.body,
-      });
-      showToast('Template saved', 'success');
-      setEditingTemplate(null);
-      load();
-    } finally {
-      setTemplateSaving(false);
-    }
-  };
-
-  useEffect(() => { load(); }, [activeCampaign, filterStatus, filterMember]);
-
-  const toggleAll = () => {
-    if (selected.size === records.length) setSelected(new Set());
-    else setSelected(new Set(records.map(r => r.id)));
-  };
-
-  const toggleOne = (id: string) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const handleSend = async () => {
-    if (!selected.size) return showToast('Select at least one influencer', 'error');
-    setLoading(true);
-    try {
-      const influencer_ids = records.filter(r => selected.has(r.id)).map(r => r.influencer_id);
-      const res = await sendOutreachEmails({
-        influencer_ids,
-        campaign_id: activeCampaign?.id,
-        team_member_id: sendForm.team_member_id || analytics?.by_member?.[0]?.id,
-        template_id: sendForm.template_id,
-        follow_up_days: sendForm.follow_up_days,
-      });
-      showToast(res.data.gmail_connected
-        ? `Sent ${res.data.results.length} emails via Gmail ✓`
-        : `Queued ${res.data.results.length} emails (Gmail not connected)`,
-        res.data.gmail_connected ? 'success' : 'info'
-      );
-      setSelected(new Set());
-      setShowSendModal(false);
-      load();
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -166,7 +219,7 @@ export default function Outreach() {
     if (!addForm.name || !addForm.platform) return showToast('Name and platform are required', 'error');
     setAddLoading(true);
     try {
-      await createInfluencer({ ...addForm, followers: Number(addForm.followers) || 0 });
+      await createInfluencer({ ...addForm, followers: Number(addForm.followers) || 0, avg_reel_views: Number(addForm.avg_reel_views) || 0 });
       showToast(`${addForm.name} added!`, 'success');
       setAddForm(BLANK_INF);
       setShowAddModal(false);
@@ -178,219 +231,548 @@ export default function Outreach() {
 
   const handleFollowUp = async (id: string) => {
     await sendFollowUp(id);
-    showToast('Follow-up sent', 'success');
+    showToast('Follow-up marked as sent', 'success');
     load();
   };
 
   const handleStatusChange = async (id: string, status: string, influencerId: string, campaignId?: string) => {
     const res = await updateOutreachStatus(id, status, influencerId, campaignId);
-    if (res.data.pipeline_created) {
-      showToast('Influencer confirmed — added to Pipeline & Content Schedule', 'success');
-    }
+    if (res.data.pipeline_created) showToast('Confirmed — added to Pipeline & Content Schedule', 'success');
     load();
   };
 
+  // ── Template handlers ──
+  const openNewTemplate = () => {
+    setIsNewTemplate(true);
+    setEditingTemplate({ id: '', name: 'New Template', subject: '', body: 'Hi {{name}},\n\n' });
+    setShowTemplateManager(false);
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!editingTemplate) return;
+    setTemplateSaving(true);
+    try {
+      if (isNewTemplate) {
+        await createEmailTemplate({ name: editingTemplate.name, subject: editingTemplate.subject || '', body: editingTemplate.body });
+        showToast('Template created', 'success');
+      } else {
+        await updateEmailTemplate(editingTemplate.id, { name: editingTemplate.name, subject: editingTemplate.subject, body: editingTemplate.body });
+        showToast('Template saved', 'success');
+      }
+      setEditingTemplate(null);
+      setIsNewTemplate(false);
+      load();
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (id: string, name: string) => {
+    if (!window.confirm(`Delete template "${name}"?`)) return;
+    await deleteEmailTemplate(id);
+    showToast('Template deleted', 'info');
+    load();
+  };
+
+  // ── DM modal ──
+  const openDmModal = (recs: any[]) => { setDmRecords(recs); setShowDmModal(true); };
+
+  const handleMarkSent = async () => {
+    if (!activeCampaign) return showToast('Select a campaign first', 'error');
+    const ids = dmRecords.map(r => r.influencer_id || r.id);
+    if (!ids.length) return;
+    setLoading(true);
+    try {
+      await sendOutreachEmails({
+        influencer_ids: ids,
+        campaign_id: activeCampaign.id,
+        team_member_id: sendForm.team_member_id || members[0]?.id,
+        template_id: sendForm.template_id,
+        follow_up_days: sendForm.follow_up_days,
+      });
+      showToast(`Marked ${ids.length} influencer${ids.length !== 1 ? 's' : ''} as DM sent`, 'success');
+      setSelected(new Set());
+      setDiscoverSelected(new Set());
+      setShowDmModal(false);
+      load();
+      if (activeTab === 'discover') handleDiscover();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyDM = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // ── Discover tab handlers ──
+  const toggleDiscoverAll = () => {
+    if (discoverSelected.size === discoverResults.length) setDiscoverSelected(new Set());
+    else setDiscoverSelected(new Set(discoverResults.map(r => r.id)));
+  };
+  const toggleDiscoverOne = (id: string) => {
+    setDiscoverSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  };
+
+  const handleAddFromIg = async (profile: any) => {
+    setAddingIg(profile.id);
+    try {
+      await createInfluencer({
+        name: profile.name || profile.username,
+        platform: 'Instagram',
+        username: profile.username,
+        followers: profile.followers_count,
+        avg_reel_views: profile.avg_reel_views,
+        category: '',
+        country: '',
+      });
+      showToast(`@${profile.username} added to dashboard!`, 'success');
+      load();
+    } catch { showToast('Failed to add', 'error'); }
+    finally { setAddingIg(null); }
+  };
+
+  const prepareDiscoverDMs = () => {
+    const sel = discoverResults.filter(r => discoverSelected.has(r.id));
+    if (!sel.length) return showToast('Select at least one influencer', 'info');
+    openDmModal(sel.map(r => ({
+      id: r.id, influencer_id: r.id,
+      influencer_name: r.name || r.username,
+      username: r.username, platform: 'Instagram', followers: r.followers_count,
+    })));
+  };
+
+  // ── Derived ──
   const members = analytics?.by_member || [];
   const totals = analytics?.totals || {};
-  const openRate = totals.total_sent > 0 ? ((totals.total_opened / totals.total_sent) * 100).toFixed(0) : 0;
-  const replyRate = totals.total_sent > 0 ? ((totals.total_replied / totals.total_sent) * 100).toFixed(0) : 0;
+  const responseRate = totals.total_sent > 0 ? ((totals.total_replied / totals.total_sent) * 100).toFixed(0) : 0;
+  const selectedTemplate = templates.find(t => t.id === sendForm.template_id);
+
+  const tabCls = (tab: 'outreach' | 'discover') =>
+    `flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`;
 
   return (
     <div className="p-6 space-y-5">
-      {/* Stats row */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'Total Contacted', value: totals.total_sent || 0, icon: <Mail size={16} className="text-blue-500" /> },
-          { label: 'Email Open Rate', value: `${openRate}%`, icon: <Eye size={16} className="text-yellow-500" /> },
-          { label: 'Reply Rate', value: `${replyRate}%`, icon: <MessageSquare size={16} className="text-purple-500" /> },
-          { label: 'Confirmed', value: totals.total_confirmed || 0, icon: <Check size={16} className="text-green-500" /> },
-        ].map(stat => (
-          <div key={stat.label} className="card p-4 flex items-center gap-3">
-            <div className="w-9 h-9 bg-slate-50 rounded-lg flex items-center justify-center">{stat.icon}</div>
-            <div>
-              <div className="text-xl font-bold text-slate-900">{stat.value}</div>
-              <div className="text-xs text-slate-500">{stat.label}</div>
-            </div>
-          </div>
-        ))}
+      {/* ── Tab bar ── */}
+      <div className="flex items-center border-b border-slate-200 -mb-1">
+        <button className={tabCls('outreach')} onClick={() => setActiveTab('outreach')}>
+          <Send size={14} /> Outreach
+        </button>
+        <button className={tabCls('discover')} onClick={() => setActiveTab('discover')}>
+          <Search size={14} /> Discover
+        </button>
+        <div className="ml-auto pb-2">
+          <button onClick={() => setShowTemplateManager(true)} className="btn-secondary flex items-center gap-1.5 text-xs">
+            <FileText size={13} /> Templates
+          </button>
+        </div>
       </div>
 
-      {/* Team stats */}
-      {members.length > 0 && (
-        <div className="card p-4">
-          <div className="text-sm font-semibold text-slate-700 mb-3">Team Performance</div>
-          <div className="grid grid-cols-3 gap-3">
-            {members.map((m: any) => {
-              const isConnected = connectedMemberIds.has(m.id);
-              return (
-                <div key={m.id} className="bg-slate-50 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="font-medium text-sm text-slate-800">{m.name}</div>
-                    <div className="flex items-center gap-1.5">
-                      {isConnected ? (
-                        <>
-                          <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
-                            <Wifi size={11} /> Gmail
-                          </span>
-                          <button
-                            onClick={() => handleDisconnectGmail(m.id)}
-                            title="Disconnect Gmail"
-                            className="text-slate-400 hover:text-red-500 transition-colors"
-                          >
-                            <WifiOff size={11} />
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => handleConnectGmail(m.id)}
-                          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
-                          title={`Connect ${m.email} to Gmail`}
-                        >
-                          <WifiOff size={11} /> Connect
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-400 mb-1.5">{m.email}</div>
-                  <div className="flex gap-3 text-xs text-slate-500">
-                    <span><span className="font-semibold text-slate-700">{m.total_sent}</span> sent</span>
-                    <span><span className="font-semibold text-slate-700">{m.total_opened}</span> opened</span>
-                    <span><span className="font-semibold text-green-600">{m.total_confirmed}</span> confirmed</span>
-                  </div>
+      {/* ════════════════════════════════════════
+          OUTREACH TAB
+      ════════════════════════════════════════ */}
+      {activeTab === 'outreach' && (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-4 gap-4">
+            {[
+              { label: 'Total Contacted', value: totals.total_sent || 0, icon: <Send size={16} className="text-blue-500" /> },
+              { label: 'Response Rate', value: `${responseRate}%`, icon: <MessageSquare size={16} className="text-yellow-500" /> },
+              { label: 'Replied', value: totals.total_replied || 0, icon: <MessageSquare size={16} className="text-purple-500" /> },
+              { label: 'Confirmed', value: totals.total_confirmed || 0, icon: <Check size={16} className="text-green-500" /> },
+            ].map(stat => (
+              <div key={stat.label} className="card p-4 flex items-center gap-3">
+                <div className="w-9 h-9 bg-slate-50 rounded-lg flex items-center justify-center">{stat.icon}</div>
+                <div>
+                  <div className="text-xl font-bold text-slate-900">{stat.value}</div>
+                  <div className="text-xs text-slate-500">{stat.label}</div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Follow-ups pending */}
-      {followUps.length > 0 && (
-        <div className="card p-4 border-l-4 border-l-orange-400">
-          <div className="flex items-center gap-2 mb-3">
-            <Clock size={15} className="text-orange-500" />
-            <span className="text-sm font-semibold text-slate-700">{followUps.length} Follow-ups Due</span>
-          </div>
-          <div className="space-y-2">
-            {followUps.map(f => (
-              <div key={f.id} className="flex items-center justify-between">
-                <div className="text-sm text-slate-600">
-                  <span className="font-medium text-slate-800">{f.influencer_name}</span> · {f.team_member_name}
-                </div>
-                <button onClick={() => handleFollowUp(f.id)} className="btn-primary py-1 px-3 text-xs">
-                  Send Follow-up
-                </button>
               </div>
             ))}
           </div>
+
+          {/* Team performance */}
+          {members.length > 0 && (
+            <div className="card p-4">
+              <div className="text-sm font-semibold text-slate-700 mb-3">Team Performance</div>
+              <div className="grid grid-cols-3 gap-3">
+                {members.map((m: any) => (
+                  <div key={m.id} className="bg-slate-50 rounded-lg p-3">
+                    <div className="font-medium text-sm text-slate-800 mb-0.5">{m.name}</div>
+                    <div className="text-xs text-slate-400 mb-1.5">{m.email}</div>
+                    <div className="flex gap-3 text-xs text-slate-500">
+                      <span><span className="font-semibold text-slate-700">{m.total_sent}</span> DMed</span>
+                      <span><span className="font-semibold text-slate-700">{m.total_replied}</span> replied</span>
+                      <span><span className="font-semibold text-green-600">{m.total_confirmed}</span> confirmed</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Follow-ups due */}
+          {followUps.length > 0 && (
+            <div className="card p-4 border-l-4 border-l-orange-400">
+              <div className="flex items-center gap-2 mb-3">
+                <Clock size={15} className="text-orange-500" />
+                <span className="text-sm font-semibold text-slate-700">{followUps.length} Follow-ups Due</span>
+              </div>
+              <div className="space-y-2">
+                {followUps.map(f => (
+                  <div key={f.id} className="flex items-center justify-between">
+                    <div className="text-sm text-slate-600">
+                      <span className="font-medium text-slate-800">{f.influencer_name}</span>
+                      {f.username && <span className="text-slate-400 ml-1">@{f.username}</span>}
+                      {' · '}{f.team_member_name}
+                    </div>
+                    <button onClick={() => handleFollowUp(f.id)} className="btn-primary py-1 px-3 text-xs">
+                      Mark Follow-up Sent
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Influencer table */}
+          <div className="card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-slate-700">Influencers ({records.length})</span>
+                {selected.size > 0 && <span className="badge bg-blue-100 text-blue-700">{selected.size} selected</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <select className="select text-xs py-1.5 w-32" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                  <option value="">All Status</option>
+                  {STATUS_ORDER.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                </select>
+                <select className="select text-xs py-1.5 w-36" value={filterMember} onChange={e => setFilterMember(e.target.value)}>
+                  <option value="">All Members</option>
+                  {members.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <button onClick={() => setShowAddModal(true)} className="btn-secondary flex items-center gap-1.5">
+                  <Plus size={14} /> Add Influencer
+                </button>
+                <button
+                  onClick={() => {
+                    if (!selected.size) return showToast('Select influencers first', 'info');
+                    openDmModal(records.filter(r => selected.has(r.id)));
+                  }}
+                  className="btn-primary flex items-center gap-1.5"
+                >
+                  <MessageSquare size={14} />
+                  Prepare DMs {selected.size > 0 && `(${selected.size})`}
+                </button>
+              </div>
+            </div>
+
+            <table className="w-full">
+              <thead className="bg-slate-50 border-b border-slate-100">
+                <tr>
+                  <th className="table-header w-10">
+                    <input type="checkbox" checked={selected.size === records.length && records.length > 0} onChange={toggleAll} className="rounded border-slate-300" />
+                  </th>
+                  <th className="table-header">Influencer</th>
+                  <th className="table-header">Platform</th>
+                  <th className="table-header">Followers</th>
+                  <th className="table-header">Status</th>
+                  <th className="table-header">Team Member</th>
+                  <th className="table-header">DM Sent</th>
+                  <th className="table-header">Follow-up</th>
+                  <th className="table-header">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {records.map(r => (
+                  <tr key={r.id} className={`hover:bg-slate-50 transition-colors ${selected.has(r.id) ? 'bg-blue-50' : ''}`}>
+                    <td className="table-cell">
+                      <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} className="rounded border-slate-300" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="font-medium text-slate-900">{r.influencer_name}</div>
+                      {r.username ? (
+                        <a href={getPlatformUrl(r.platform, r.username)} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-blue-500 hover:underline flex items-center gap-0.5">
+                          @{r.username} <ExternalLink size={10} />
+                        </a>
+                      ) : (
+                        <div className="text-xs text-slate-400">{r.influencer_email || '—'}</div>
+                      )}
+                    </td>
+                    <td className="table-cell">
+                      <span className={`badge ${getPlatformColor(r.platform)}`}>{getPlatformIcon(r.platform)} {r.platform}</span>
+                    </td>
+                    <td className="table-cell text-slate-500">{formatNumber(r.followers)}</td>
+                    <td className="table-cell">
+                      <select value={r.status}
+                        onChange={e => handleStatusChange(r.id, e.target.value, r.influencer_id, activeCampaign?.id)}
+                        className={`badge border-0 cursor-pointer text-xs font-medium ${getStatusColor(r.status)}`}>
+                        {STATUS_ORDER.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                      </select>
+                    </td>
+                    <td className="table-cell text-slate-500">{r.team_member_name}</td>
+                    <td className="table-cell text-slate-500 text-xs">{r.sent_at ? formatDate(r.sent_at) : '—'}</td>
+                    <td className="table-cell text-xs">
+                      {r.follow_up_date ? (
+                        <span className={`badge ${new Date(r.follow_up_date) < new Date() ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                          {formatDate(r.follow_up_date)}
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleFollowUp(r.id)} className="text-xs text-blue-600 hover:underline">Follow up</button>
+                        <button onClick={() => openEditInfluencer(r)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors"><Pencil size={13} /></button>
+                        <button onClick={() => handleDeleteInfluencer(r.influencer_id, r.influencer_name)} className="p-1 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {records.length === 0 && (
+                  <tr><td colSpan={9} className="text-center py-12 text-slate-400 text-sm">No influencers yet — add one or use the Discover tab</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* ════════════════════════════════════════
+          DISCOVER TAB
+      ════════════════════════════════════════ */}
+      {activeTab === 'discover' && (
+        <div className="space-y-4">
+
+          {/* ── Instagram connection status bar ── */}
+          {igStatus && !igStatus.connected && (
+            <div className="card p-4 flex items-center gap-3 border-l-4 border-l-pink-400">
+              <div className="text-xl shrink-0">📸</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-slate-800 text-sm">Connect Instagram to search for creators</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  {!igStatus.configured
+                    ? 'Add INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET to your .env, then restart the server'
+                    : 'Link your Instagram Business account to enable live hashtag search'}
+                </div>
+              </div>
+              {igStatus.configured && (
+                <button onClick={async () => {
+                  try { const r = await getInstagramAuthUrl(); window.location.href = r.data.url; }
+                  catch (e: any) { showToast(e.response?.data?.error || 'Failed', 'error'); }
+                }} className="btn-primary shrink-0 text-sm flex items-center gap-1.5">
+                  📸 Connect Instagram
+                </button>
+              )}
+            </div>
+          )}
+          {igStatus?.connected && (
+            <div className="card px-4 py-2.5 flex items-center gap-2 text-sm">
+              <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+              <span className="text-slate-500">Connected as</span>
+              <span className="font-semibold text-slate-800">@{igStatus.username}</span>
+              <button onClick={async () => {
+                if (!confirm('Disconnect Instagram?')) return;
+                await disconnectInstagram();
+                setIgStatus(s => s ? { ...s, connected: false, username: null } : s);
+                setDiscoverResults([]);
+                showToast('Instagram disconnected', 'info');
+              }} className="ml-auto text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
+                <Link2Off size={12} /> Disconnect
+              </button>
+            </div>
+          )}
+
+          {/* ── Search criteria ── */}
+          <div className="card p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Filter size={15} className="text-slate-500" />
+              <span className="text-sm font-semibold text-slate-700">Search Criteria</span>
+              <span className="text-xs text-slate-400 ml-1">— pulls matching creators directly from Instagram</span>
+            </div>
+
+            {/* Numeric filters row */}
+            <div className="flex items-end gap-3 flex-wrap">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Min Followers</label>
+                <input type="number" className="input w-28 text-sm" value={discoverMinFollowers}
+                  onChange={e => setDiscoverMinFollowers(Number(e.target.value))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Max Followers</label>
+                <input type="number" className="input w-28 text-sm" value={discoverMaxFollowers}
+                  onChange={e => setDiscoverMaxFollowers(Number(e.target.value))} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Min Avg Reel Views</label>
+                <input type="number" className="input w-36 text-sm" value={discoverMinViews}
+                  onChange={e => setDiscoverMinViews(Number(e.target.value))} />
+              </div>
+              <button onClick={handleDiscover} disabled={discoverLoading || !igStatus?.connected}
+                className="btn-primary flex items-center gap-1.5 self-end">
+                {discoverLoading ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                Search Instagram
+              </button>
+            </div>
+
+            {/* Hashtag chip input */}
+            <div className="mt-4">
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                Hashtags <span className="text-slate-400 font-normal">— narrow down by niche (required)</span>
+              </label>
+              <div
+                className="flex flex-wrap gap-1.5 border border-slate-200 rounded-xl px-3 py-2 min-h-[42px] bg-white focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-100 transition-all cursor-text"
+                onClick={e => (e.currentTarget.querySelector('input') as HTMLInputElement)?.focus()}
+              >
+                {hashtags.map(tag => (
+                  <span key={tag} className="inline-flex items-center gap-1 bg-pink-100 text-pink-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                    #{tag}
+                    <button onClick={() => setHashtags(h => h.filter(t => t !== tag))} className="hover:text-pink-900">
+                      <X size={9} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  className="flex-1 min-w-[140px] outline-none text-sm text-slate-700 bg-transparent"
+                  placeholder={hashtags.length ? 'Add more…' : '#nycfood  #chinatownnyc  #nycrestaurants…'}
+                  value={hashInput}
+                  onChange={e => setHashInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addHashtag(hashInput); }
+                    if (e.key === 'Backspace' && !hashInput && hashtags.length) setHashtags(h => h.slice(0, -1));
+                  }}
+                  onBlur={() => { if (hashInput) addHashtag(hashInput); }}
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-1.5">
+                Press <kbd className="bg-slate-100 px-1 rounded text-[10px]">Enter</kbd> or <kbd className="bg-slate-100 px-1 rounded text-[10px]">,</kbd> to add a tag · Up to 5 hashtags (Instagram API limit per week)
+              </p>
+            </div>
+          </div>
+
+          {/* ── Results ── */}
+          <div className="card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-slate-700">
+                  {discoverLoading ? 'Searching Instagram…' : `${discoverResults.length} creator${discoverResults.length !== 1 ? 's' : ''} found`}
+                </span>
+                {discoverSelected.size > 0 && (
+                  <span className="badge bg-blue-100 text-blue-700">{discoverSelected.size} selected</span>
+                )}
+              </div>
+              {discoverSelected.size > 0 && (
+                <button onClick={prepareDiscoverDMs} className="btn-primary flex items-center gap-1.5">
+                  <MessageSquare size={14} /> Prepare DMs ({discoverSelected.size})
+                </button>
+              )}
+            </div>
+
+            <table className="w-full">
+              <thead className="bg-slate-50 border-b border-slate-100">
+                <tr>
+                  <th className="table-header w-10">
+                    <input type="checkbox"
+                      checked={discoverSelected.size === discoverResults.length && discoverResults.length > 0}
+                      onChange={toggleDiscoverAll} className="rounded border-slate-300" />
+                  </th>
+                  <th className="table-header">Creator</th>
+                  <th className="table-header">Followers</th>
+                  <th className="table-header">Avg Reel Views</th>
+                  <th className="table-header">Bio</th>
+                  <th className="table-header">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {discoverLoading && (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10">
+                      <RefreshCw size={18} className="animate-spin text-slate-400 mx-auto mb-2" />
+                      <div className="text-xs text-slate-400">Fetching creators from Instagram — this may take a few seconds…</div>
+                    </td>
+                  </tr>
+                )}
+                {!discoverLoading && discoverResults.map(r => (
+                  <tr key={r.id} className={`hover:bg-slate-50 transition-colors ${discoverSelected.has(r.id) ? 'bg-blue-50' : ''}`}>
+                    <td className="table-cell">
+                      <input type="checkbox" checked={discoverSelected.has(r.id)}
+                        onChange={() => toggleDiscoverOne(r.id)} className="rounded border-slate-300" />
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2.5">
+                        {r.profile_picture_url && (
+                          <img src={r.profile_picture_url} alt="" className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0" />
+                        )}
+                        <div>
+                          <div className="font-medium text-slate-900 text-sm">{r.name || r.username}</div>
+                          <a href={`https://instagram.com/${r.username}`} target="_blank" rel="noopener noreferrer"
+                            className="text-xs text-blue-500 hover:underline flex items-center gap-0.5">
+                            @{r.username} <ExternalLink size={10} />
+                          </a>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="table-cell text-slate-600 text-sm">{formatNumber(r.followers_count)}</td>
+                    <td className="table-cell">
+                      <span className={`font-semibold text-sm ${r.avg_reel_views >= discoverMinViews ? 'text-green-600' : 'text-slate-400'}`}>
+                        {r.avg_reel_views > 0 ? formatNumber(r.avg_reel_views) : '—'}
+                      </span>
+                      {r.reels_sampled > 0 && (
+                        <div className="text-xs text-slate-400">{r.reels_sampled} reels sampled</div>
+                      )}
+                    </td>
+                    <td className="table-cell text-slate-400 text-xs max-w-[200px]">
+                      <div className="line-clamp-2">{r.biography || '—'}</div>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleAddFromIg(r)}
+                          disabled={addingIg === r.id}
+                          className="btn-secondary py-1 px-2.5 text-xs flex items-center gap-1"
+                        >
+                          {addingIg === r.id ? <RefreshCw size={11} className="animate-spin" /> : <Plus size={11} />}
+                          Add
+                        </button>
+                        <button
+                          onClick={() => openDmModal([{
+                            id: r.id, influencer_id: r.id,
+                            influencer_name: r.name || r.username,
+                            username: r.username, platform: 'Instagram', followers: r.followers_count,
+                          }])}
+                          className="btn-primary py-1 px-2.5 text-xs flex items-center gap-1"
+                        >
+                          <MessageSquare size={11} /> DM
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!discoverLoading && discoverResults.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="text-center py-12 text-slate-400 text-sm">
+                      {!igStatus?.connected
+                        ? 'Connect Instagram above to start searching'
+                        : hashtags.length === 0
+                          ? <>Add hashtags above (e.g. <span className="font-mono text-pink-500">#nycfood</span>) and click Search Instagram</>
+                          : 'No creators matched your criteria — try different hashtags or broader follower/view ranges'
+                      }
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* Table */}
-      <div className="card overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-slate-700">Influencers ({records.length})</span>
-            {selected.size > 0 && (
-              <span className="badge bg-blue-100 text-blue-700">{selected.size} selected</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <select className="select text-xs py-1.5 w-32" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-              <option value="">All Status</option>
-              {STATUS_ORDER.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
-            </select>
-            <select className="select text-xs py-1.5 w-36" value={filterMember} onChange={e => setFilterMember(e.target.value)}>
-              <option value="">All Members</option>
-              {members.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-            <button onClick={() => setShowAddModal(true)} className="btn-secondary flex items-center gap-1.5">
-              <Plus size={14} /> Add Influencer
-            </button>
-            <button
-              onClick={() => { if (selected.size > 0) setShowSendModal(true); else showToast('Select influencers first', 'info'); }}
-              className="btn-primary flex items-center gap-1.5"
-            >
-              <Send size={14} />
-              Send Email {selected.size > 0 && `(${selected.size})`}
-            </button>
-          </div>
-        </div>
+      {/* ════════════════════════════════════════
+          MODALS
+      ════════════════════════════════════════ */}
 
-        <table className="w-full">
-          <thead className="bg-slate-50 border-b border-slate-100">
-            <tr>
-              <th className="table-header w-10">
-                <input type="checkbox" checked={selected.size === records.length && records.length > 0}
-                  onChange={toggleAll} className="rounded border-slate-300" />
-              </th>
-              <th className="table-header">Influencer</th>
-              <th className="table-header">Platform</th>
-              <th className="table-header">Followers</th>
-              <th className="table-header">Status</th>
-              <th className="table-header">Team Member</th>
-              <th className="table-header">Sent</th>
-              <th className="table-header">Follow-up</th>
-              <th className="table-header">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {records.map(r => (
-              <tr key={r.id} className={`hover:bg-slate-50 transition-colors ${selected.has(r.id) ? 'bg-blue-50' : ''}`}>
-                <td className="table-cell">
-                  <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} className="rounded border-slate-300" />
-                </td>
-                <td className="table-cell">
-                  <div className="font-medium text-slate-900">{r.influencer_name}</div>
-                  <div className="text-xs text-slate-400">{r.influencer_email}</div>
-                </td>
-                <td className="table-cell">
-                  <span className={`badge ${getPlatformColor(r.platform)}`}>
-                    {getPlatformIcon(r.platform)} {r.platform}
-                  </span>
-                </td>
-                <td className="table-cell text-slate-500">{formatNumber(r.followers)}</td>
-                <td className="table-cell">
-                  <select
-                    value={r.status}
-                    onChange={e => handleStatusChange(r.id, e.target.value, r.influencer_id, activeCampaign?.id)}
-                    className={`badge border-0 cursor-pointer text-xs font-medium ${getStatusColor(r.status)}`}
-                  >
-                    {STATUS_ORDER.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
-                  </select>
-                </td>
-                <td className="table-cell text-slate-500">{r.team_member_name}</td>
-                <td className="table-cell text-slate-500 text-xs">{r.sent_at ? formatDate(r.sent_at) : '—'}</td>
-                <td className="table-cell text-xs">
-                  {r.follow_up_date ? (
-                    <span className={`badge ${new Date(r.follow_up_date) < new Date() ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                      {formatDate(r.follow_up_date)}
-                    </span>
-                  ) : '—'}
-                </td>
-                <td className="table-cell">
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => handleFollowUp(r.id)} className="text-xs text-blue-600 hover:underline">
-                      Follow up
-                    </button>
-                    <button onClick={() => openEditInfluencer(r)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors" title="Edit influencer">
-                      <Pencil size={13} />
-                    </button>
-                    <button onClick={() => handleDeleteInfluencer(r.influencer_id, r.influencer_name)} className="p-1 text-slate-300 hover:text-red-500 transition-colors" title="Remove influencer">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {records.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-12 text-slate-400 text-sm">No outreach records found</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Edit Influencer Modal */}
+      {/* Edit influencer */}
       {editingInfluencer && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
@@ -425,13 +807,19 @@ export default function Outreach() {
                   <input className="input" type="number" value={editForm.followers} onChange={e => setEditForm(f => ({ ...f, followers: e.target.value }))} />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Avg Reel Views</label>
+                  <input className="input" type="number" value={editForm.avg_reel_views} onChange={e => setEditForm(f => ({ ...f, avg_reel_views: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
                   <input className="input" value={editForm.category} onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))} />
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                <input className="input" value={editForm.country} onChange={e => setEditForm(f => ({ ...f, country: e.target.value }))} />
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                  <input className="input" value={editForm.country} onChange={e => setEditForm(f => ({ ...f, country: e.target.value }))} />
+                </div>
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
@@ -445,7 +833,7 @@ export default function Outreach() {
         </div>
       )}
 
-      {/* Add Influencer Modal */}
+      {/* Add influencer */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
@@ -456,7 +844,7 @@ export default function Outreach() {
             <div className="p-5 space-y-3">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Name *</label>
-                <input className="input" placeholder="e.g. G Loh" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
+                <input className="input" placeholder="e.g. Sarah Tan" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -466,12 +854,12 @@ export default function Outreach() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Username / Handle</label>
                   <input className="input" placeholder="@handle" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email (optional)</label>
                 <input className="input" type="email" placeholder="influencer@gmail.com" value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -480,13 +868,19 @@ export default function Outreach() {
                   <input className="input" type="number" placeholder="0" value={addForm.followers} onChange={e => setAddForm(f => ({ ...f, followers: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                  <input className="input" placeholder="e.g. Lifestyle" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))} />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Avg Reel Views</label>
+                  <input className="input" type="number" placeholder="0" value={addForm.avg_reel_views} onChange={e => setAddForm(f => ({ ...f, avg_reel_views: e.target.value }))} />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                <input className="input" placeholder="e.g. US" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+                  <input className="input" placeholder="e.g. Food, Lifestyle" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                  <input className="input" placeholder="e.g. MY" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
+                </div>
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
@@ -500,13 +894,71 @@ export default function Outreach() {
         </div>
       )}
 
-      {/* Template Editor Modal */}
+      {/* Template manager */}
+      {showTemplateManager && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
+              <h3 className="font-semibold text-slate-900">DM Templates</h3>
+              <div className="flex items-center gap-2">
+                <button onClick={openNewTemplate} className="btn-primary flex items-center gap-1.5 text-sm">
+                  <Plus size={13} /> New Template
+                </button>
+                <button onClick={() => setShowTemplateManager(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+              </div>
+            </div>
+
+            <div className="px-5 pt-4 pb-2 shrink-0">
+              <div className="bg-blue-50 rounded-xl p-3 text-xs">
+                <div className="font-semibold text-blue-800 mb-2">Template Variables</div>
+                <div className="space-y-1">
+                  {TEMPLATE_VARS.map(v => (
+                    <div key={v.var} className="flex gap-2">
+                      <code className="font-mono text-blue-700 shrink-0 w-36">{v.var}</code>
+                      <span className="text-blue-600">{v.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-5 pb-5 space-y-2 mt-2">
+              {templates.length === 0 && (
+                <div className="text-center py-8 text-slate-400 text-sm">No templates yet — create one above</div>
+              )}
+              {templates.map(t => (
+                <div key={t.id} className="border border-slate-200 rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-slate-900 text-sm">{t.name}</div>
+                      <div className="text-xs text-slate-400 mt-0.5 line-clamp-2 whitespace-pre-line">{t.body}</div>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <button
+                        onClick={() => { setIsNewTemplate(false); setEditingTemplate({ ...t }); setShowTemplateManager(false); }}
+                        className="btn-secondary py-1 px-2.5 text-xs flex items-center gap-1">
+                        <Pencil size={11} /> Edit
+                      </button>
+                      <button onClick={() => handleDeleteTemplate(t.id, t.name)}
+                        className="p-1.5 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Template editor (create or edit) */}
       {editingTemplate && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
-              <h3 className="font-semibold text-slate-900">Edit Template</h3>
-              <button onClick={() => setEditingTemplate(null)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+              <h3 className="font-semibold text-slate-900">{isNewTemplate ? 'New DM Template' : 'Edit DM Template'}</h3>
+              <button onClick={() => { setEditingTemplate(null); setIsNewTemplate(false); }} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
             </div>
             <div className="p-5 space-y-4 overflow-y-auto">
               <div>
@@ -514,108 +966,126 @@ export default function Outreach() {
                 <input className="input" value={editingTemplate.name}
                   onChange={e => setEditingTemplate((t: any) => ({ ...t, name: e.target.value }))} />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Subject Line</label>
-                <input className="input" value={editingTemplate.subject}
-                  onChange={e => setEditingTemplate((t: any) => ({ ...t, subject: e.target.value }))} />
+              <div className="bg-blue-50 rounded-xl p-3 text-xs">
+                <div className="font-semibold text-blue-800 mb-1.5">Variables</div>
+                <div className="flex flex-col gap-1">
+                  {TEMPLATE_VARS.map(v => (
+                    <span key={v.var}><code className="font-mono text-blue-700">{v.var}</code> <span className="text-blue-600">— {v.desc}</span></span>
+                  ))}
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Body
-                  <span className="ml-2 text-xs font-normal text-slate-400">Use {'{{name}}'}, {'{{platform}}'}, {'{{sender_name}}'}</span>
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Message Body</label>
                 <textarea className="input font-mono text-sm" rows={16} value={editingTemplate.body}
                   onChange={e => setEditingTemplate((t: any) => ({ ...t, body: e.target.value }))} />
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100 shrink-0">
-              <button onClick={() => setEditingTemplate(null)} className="btn-secondary">Cancel</button>
+              <button onClick={() => { setEditingTemplate(null); setIsNewTemplate(false); }} className="btn-secondary">Cancel</button>
               <button onClick={handleSaveTemplate} disabled={templateSaving} className="btn-primary flex items-center gap-2">
                 {templateSaving ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-                Save Template
+                {isNewTemplate ? 'Create Template' : 'Save Template'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Send Modal */}
-      {showSendModal && (
+      {/* DM prep modal */}
+      {showDmModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-900">Send Emails to {selected.size} Influencer{selected.size > 1 ? 's' : ''}</h3>
-              <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
+              <h3 className="font-semibold text-slate-900">
+                Prepare DMs — {dmRecords.length} influencer{dmRecords.length !== 1 ? 's' : ''}
+              </h3>
+              <button onClick={() => setShowDmModal(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
             </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Email Template</label>
-                <div className="flex gap-2">
-                  <select className="select flex-1" value={sendForm.template_id} onChange={e => setSendForm(f => ({ ...f, template_id: e.target.value }))}>
-                    {templates.map(t => <option key={t.id} value={t.id}>{t.name} — {t.subject}</option>)}
-                  </select>
-                  {sendForm.template_id && (
+
+            <div className="p-5 space-y-5 overflow-y-auto flex-1">
+              {/* Template + follow-up settings */}
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">DM Template</label>
+                  <div className="flex gap-2">
+                    <select className="select flex-1" value={sendForm.template_id}
+                      onChange={e => setSendForm(f => ({ ...f, template_id: e.target.value }))}>
+                      <option value="">— Select template —</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
                     <button
-                      onClick={() => {
-                        const t = templates.find(t => t.id === sendForm.template_id);
-                        if (t) { setEditingTemplate({ ...t }); setShowSendModal(false); }
-                      }}
-                      className="btn-secondary px-3 flex items-center gap-1.5 shrink-0"
-                      title="Edit template"
+                      onClick={() => { setShowTemplateManager(true); setShowDmModal(false); }}
+                      className="btn-secondary px-3 flex items-center gap-1.5 shrink-0 text-xs"
                     >
-                      <Pencil size={14} /> Edit
+                      <FileText size={13} /> Manage
                     </button>
-                  )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Follow-up in</label>
+                  <div className="flex gap-1.5">
+                    {[1, 3, 5, 7].map(d => (
+                      <button key={d} onClick={() => setSendForm(f => ({ ...f, follow_up_days: d }))}
+                        className={`px-2.5 py-1.5 rounded-lg text-sm border transition-colors ${sendForm.follow_up_days === d ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                        {d}d
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Sender (Team Member)</label>
-                <select className="select" value={sendForm.team_member_id} onChange={e => setSendForm(f => ({ ...f, team_member_id: e.target.value }))}>
-                  <option value="">Auto (first connected account)</option>
-                  {members.map((m: any) => {
-                    const isConn = connectedMemberIds.has(m.id);
-                    return (
-                      <option key={m.id} value={m.id}>
-                        {isConn ? '✓ ' : '✗ '}{m.name} — {m.email || 'No email'}{!isConn ? ' (Gmail not connected)' : ''}
-                      </option>
-                    );
-                  })}
-                </select>
-                {sendForm.team_member_id && !connectedMemberIds.has(sendForm.team_member_id) && (
-                  <p className="text-xs text-amber-600 mt-1">
-                    This member's Gmail is not connected — email will not send. Connect their Gmail in Team Performance above.
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Auto Follow-up (days after sending)</label>
-                <div className="flex gap-2">
-                  {[1, 2, 3, 5, 7].map(d => (
-                    <button key={d} onClick={() => setSendForm(f => ({ ...f, follow_up_days: d }))}
-                      className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${sendForm.follow_up_days === d ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                      {d}d
-                    </button>
-                  ))}
-                  <input type="number" value={sendForm.follow_up_days} onChange={e => setSendForm(f => ({ ...f, follow_up_days: +e.target.value }))}
-                    className="input w-16 text-center" min={1} max={30} />
-                </div>
-              </div>
-              <div className="bg-slate-50 rounded-lg p-3">
-                <div className="text-xs text-slate-500">Selected influencers:</div>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {records.filter(r => selected.has(r.id)).slice(0, 6).map(r => (
-                    <span key={r.id} className="badge bg-blue-100 text-blue-700">{r.influencer_name}</span>
-                  ))}
-                  {selected.size > 6 && <span className="badge bg-slate-100 text-slate-500">+{selected.size - 6} more</span>}
-                </div>
+
+              {/* Per-influencer DM cards */}
+              <div className="space-y-3">
+                {dmRecords.map(r => {
+                  const dmText = renderDM(
+                    selectedTemplate?.body || '',
+                    r.influencer_name,
+                    r.username,
+                    r.platform,
+                    members[0]?.name || 'Our Team'
+                  );
+                  const profileUrl = getPlatformUrl(r.platform, r.username);
+                  return (
+                    <div key={r.id} className="border border-slate-200 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-900">{r.influencer_name}</span>
+                          {r.username && <span className="text-slate-400 text-sm">@{r.username}</span>}
+                          <span className={`badge text-xs ${getPlatformColor(r.platform)}`}>
+                            {getPlatformIcon(r.platform)} {r.platform}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          {profileUrl && (
+                            <a href={profileUrl} target="_blank" rel="noopener noreferrer"
+                              className="btn-secondary py-1 px-2.5 text-xs flex items-center gap-1">
+                              <ExternalLink size={12} /> Open Profile
+                            </a>
+                          )}
+                          <button onClick={() => copyDM(r.id, dmText)}
+                            className="btn-primary py-1 px-2.5 text-xs flex items-center gap-1">
+                            {copiedId === r.id ? <><CheckCheck size={12} /> Copied!</> : <><Copy size={12} /> Copy DM</>}
+                          </button>
+                        </div>
+                      </div>
+                      <pre className="text-xs text-slate-600 whitespace-pre-wrap bg-slate-50 rounded-lg p-3 font-sans leading-relaxed">
+                        {dmText || '(No template selected — pick one above)'}
+                      </pre>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-            <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
-              <button onClick={() => setShowSendModal(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleSend} disabled={loading} className="btn-primary flex items-center gap-2">
-                {loading ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-                Send Now
-              </button>
+
+            <div className="flex items-center justify-between p-5 border-t border-slate-100 shrink-0">
+              <p className="text-xs text-slate-400">Copy each DM → open profile → send → click Mark as Sent.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDmModal(false)} className="btn-secondary">Close</button>
+                <button onClick={handleMarkSent} disabled={loading} className="btn-primary flex items-center gap-2">
+                  {loading ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                  Mark as Sent ({dmRecords.length})
+                </button>
+              </div>
             </div>
           </div>
         </div>

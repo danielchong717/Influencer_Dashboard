@@ -23,17 +23,19 @@ router.get('/:id', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, platform, username, email, followers, category, country } = req.body;
+  const { name, platform, username, email, followers, avg_reel_views, category, country } = req.body;
   if (!name || !platform) return res.status(400).json({ error: 'name and platform are required' });
   const id = uuidv4();
-  db.prepare(`INSERT INTO influencers (id, name, platform, username, email, followers, category, country) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, name, platform, username, email, followers || 0, category, country);
+  db.prepare(`INSERT INTO influencers (id, name, platform, username, email, followers, avg_reel_views, category, country) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, name, platform, username, email, followers || 0, avg_reel_views || 0, category, country);
   const created = db.prepare('SELECT * FROM influencers WHERE id = ?').get(id);
   res.status(201).json(created);
 });
 
 router.put('/:id', (req, res) => {
-  const { name, platform, username, email, followers, category, country } = req.body;
-  db.prepare(`UPDATE influencers SET name=?, platform=?, username=?, email=?, followers=?, category=?, country=? WHERE id=?`).run(name, platform, username, email, followers, category, country, req.params.id);
+  const { name, platform, username, email, followers, avg_reel_views, category, country } = req.body;
+  db.prepare(`UPDATE influencers SET name=?, platform=?, username=?, email=?, followers=?, avg_reel_views=?, category=?, country=? WHERE id=?`)
+    .run(name, platform, username, email, followers, avg_reel_views || 0, category, country, req.params.id);
   const updated = db.prepare('SELECT * FROM influencers WHERE id = ?').get(req.params.id);
   res.json(updated);
 });

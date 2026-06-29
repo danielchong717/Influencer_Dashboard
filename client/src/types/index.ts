@@ -24,6 +24,7 @@ export interface Influencer {
   followers: number;
   category: string;
   country: string;
+  avg_reel_views?: number;
   avatar_url?: string;
   created_at: string;
 }

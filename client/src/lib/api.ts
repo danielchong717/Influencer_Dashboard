@@ -37,6 +37,7 @@ export const getEmailTemplates = () => api.get<any[]>('/outreach/templates');
 export const createEmailTemplate = (data: any) => api.post('/outreach/templates', data);
 export const updateEmailTemplate = (id: string, data: any) => api.put(`/outreach/templates/${id}`, data);
 export const deleteEmailTemplate = (id: string) => api.delete(`/outreach/templates/${id}`);
+export const discoverInfluencers = (params?: Record<string, string>) => api.get<any[]>('/outreach/discover', { params });
 
 // Pipeline
 export const getPipeline = (params?: Record<string, string>) => api.get<any>('/pipeline', { params });
@@ -76,5 +77,15 @@ export const getLongTermPartners = () => api.get<any[]>('/longterm');
 export const signLongTermPartner = (data: any) => api.post('/longterm', data);
 export const updateLongTermPartner = (id: string, data: any) => api.put(`/longterm/${id}`, data);
 export const deleteLongTermPartner = (id: string) => api.delete(`/longterm/${id}`);
+
+// Instagram
+export const getInstagramStatus = () => api.get<any>('/instagram/status');
+export const getInstagramAuthUrl = () => api.get<{ url: string }>('/instagram/auth-url');
+export const disconnectInstagram = () => api.delete('/instagram/disconnect');
+export const searchInstagramHashtags = (
+  hashtags: string[],
+  filters?: { min_followers?: number; max_followers?: number; min_avg_views?: number }
+) => api.post<any[]>('/instagram/hashtag-search', { hashtags, ...filters });
+export const lookupInstagramProfile = (username: string) => api.get<any>('/instagram/profile', { params: { username } });
 
 export default api;

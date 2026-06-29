@@ -148,6 +148,15 @@ db.exec(`
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
   );
 
+  CREATE TABLE IF NOT EXISTS instagram_auth (
+    id INTEGER PRIMARY KEY,
+    access_token TEXT NOT NULL,
+    ig_user_id TEXT NOT NULL,
+    ig_username TEXT,
+    page_id TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS long_term_partners (
     id TEXT PRIMARY KEY,
     influencer_id TEXT NOT NULL UNIQUE,
@@ -162,5 +171,43 @@ db.exec(`
     FOREIGN KEY (influencer_id) REFERENCES influencers(id)
   );
 `);
+
+// ig_funnel table — created here so Overview works without a Feishu sync.
+// The sync:feishu script populates it; until then it stays empty and the
+// funnel panel shows zeros rather than the "not synced" error.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ig_funnel (
+    chat_id TEXT PRIMARY KEY,
+    channel TEXT DEFAULT 'instagram',
+    name TEXT,
+    handle TEXT,
+    restaurant TEXT,
+    status_raw TEXT,
+    bucket TEXT,
+    note TEXT,
+    visit_date TEXT,
+    visit_time TEXT,
+    pub_date TEXT,
+    post_url TEXT,
+    post_type TEXT,
+    owner TEXT,
+    scheduled_message TEXT,
+    last_modified TEXT,
+    feishu_url TEXT,
+    record_id TEXT,
+    action_done INTEGER DEFAULT 0,
+    paid INTEGER DEFAULT 0,
+    amount REAL DEFAULT 0,
+    updated_at TEXT
+  )
+`);
+
+// Safe column migrations — silently ignored if column already exists
+const migrations = [
+  `ALTER TABLE influencers ADD COLUMN avg_reel_views INTEGER DEFAULT 0`,
+];
+for (const sql of migrations) {
+  try { db.exec(sql); } catch {}
+}
 
 export default db;
