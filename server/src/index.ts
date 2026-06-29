@@ -28,7 +28,10 @@ seed();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+const allowedOrigin = process.env.NODE_ENV === 'production'
+  ? (process.env.CLIENT_URL || true)
+  : (process.env.CLIENT_URL || 'http://localhost:5173');
+app.use(cors({ origin: allowedOrigin, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
