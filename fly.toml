@@ -1,0 +1,24 @@
+app = "influencer-dashboard"
+primary_region = "ord"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3001"
+  DB_PATH = "/app/data/dashboard.db"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "influencer_data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
