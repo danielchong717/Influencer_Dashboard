@@ -40,7 +40,6 @@ router.get('/auth-url', (req, res) => {
   if (!APP_ID) return res.status(500).json({ error: 'INSTAGRAM_APP_ID not set in .env' });
   const scopes = [
     'instagram_basic',
-    'instagram_manage_hashtags',
     'pages_show_list',
     'pages_read_engagement',
   ].join(',');
