@@ -59,7 +59,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
+app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`\n🚀 Influencer Dashboard API running at http://localhost:${PORT}`);
   console.log(`   Health check: http://localhost:${PORT}/api/health\n`);
 });

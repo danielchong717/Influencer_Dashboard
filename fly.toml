@@ -15,6 +15,13 @@ primary_region = "ord"
   auto_start_machines = true
   min_machines_running = 1
 
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/api/health"
+
 [[mounts]]
   source = "influencer_data"
   destination = "/app/data"
