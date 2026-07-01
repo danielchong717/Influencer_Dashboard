@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   Send, RefreshCw, MessageSquare, Check, X, Clock, Plus, Pencil, Trash2,
-  Copy, CheckCheck, ExternalLink, Search, FileText, Filter, Link2Off,
+  Copy, CheckCheck, ExternalLink, Search, FileText, Filter,
 } from 'lucide-react';
 import {
   getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus,
   getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, updateInfluencer,
   deleteInfluencer, updateEmailTemplate, createEmailTemplate, deleteEmailTemplate,
-  getInstagramStatus, getInstagramAuthUrl, disconnectInstagram, searchInstagramHashtags,
+  getInstagramStatus, searchInstagramHashtags,
 } from '../lib/api';
 import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
@@ -153,14 +153,13 @@ export default function Outreach() {
   useEffect(() => {
     load();
     getInstagramStatus().then(r => setIgStatus(r.data)).catch(() => {});
-    // handle ?ig_connected=1 redirect
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('ig_connected')) {
-      showToast('Instagram connected!', 'success');
-      window.history.replaceState({}, '', window.location.pathname);
+  }, [activeCampaign, filterStatus, filterMember]);
+
+  useEffect(() => {
+    if (activeTab === 'discover') {
       getInstagramStatus().then(r => setIgStatus(r.data)).catch(() => {});
     }
-  }, [activeCampaign, filterStatus, filterMember]);
+  }, [activeTab]);
 
   // ── Outreach tab handlers ──
   const toggleAll = () => {
@@ -546,42 +545,25 @@ export default function Outreach() {
       {activeTab === 'discover' && (
         <div className="space-y-4">
 
-          {/* ── Instagram connection status bar ── */}
-          {igStatus && !igStatus.connected && (
-            <div className="card p-4 flex items-center gap-3 border-l-4 border-l-pink-400">
+          {/* ── Apify status bar ── */}
+          {igStatus && !igStatus.configured && (
+            <div className="card p-4 flex items-start gap-3 border-l-4 border-l-pink-400">
               <div className="text-xl shrink-0">📸</div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-slate-800 text-sm">Connect Instagram to search for creators</div>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  {!igStatus.configured
-                    ? 'Add INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET to your .env, then restart the server'
-                    : 'Link your Instagram Business account to enable live hashtag search'}
-                </div>
+              <div className="min-w-0">
+                <div className="font-semibold text-slate-800 text-sm mb-1">Add your Apify API key to enable Instagram search</div>
+                <ol className="text-xs text-slate-500 space-y-1 list-decimal ml-4">
+                  <li>Sign up free at <span className="font-mono text-slate-700">apify.com</span></li>
+                  <li>Go to <span className="font-mono text-slate-700">apify.com/account/integrations</span> → copy your <strong>API token</strong></li>
+                  <li>Add to your <span className="font-mono text-slate-700">.env</span> file: <code className="bg-slate-100 px-1 rounded">APIFY_API_KEY=apify_api_xxxx</code></li>
+                  <li>Restart the server</li>
+                </ol>
               </div>
-              {igStatus.configured && (
-                <button onClick={async () => {
-                  try { const r = await getInstagramAuthUrl(); window.location.href = r.data.url; }
-                  catch (e: any) { showToast(e.response?.data?.error || 'Failed', 'error'); }
-                }} className="btn-primary shrink-0 text-sm flex items-center gap-1.5">
-                  📸 Connect Instagram
-                </button>
-              )}
             </div>
           )}
-          {igStatus?.connected && (
+          {igStatus?.configured && (
             <div className="card px-4 py-2.5 flex items-center gap-2 text-sm">
               <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
-              <span className="text-slate-500">Connected as</span>
-              <span className="font-semibold text-slate-800">@{igStatus.username}</span>
-              <button onClick={async () => {
-                if (!confirm('Disconnect Instagram?')) return;
-                await disconnectInstagram();
-                setIgStatus(s => s ? { ...s, connected: false, username: null } : s);
-                setDiscoverResults([]);
-                showToast('Instagram disconnected', 'info');
-              }} className="ml-auto text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
-                <Link2Off size={12} /> Disconnect
-              </button>
+              <span className="text-slate-500">Apify connected — searches pull live from Instagram</span>
             </div>
           )}
 
