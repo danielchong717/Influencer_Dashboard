@@ -244,13 +244,18 @@ export default function Outreach() {
   };
 
   const parseBulk = (text: string) => {
-    return text.split(/\n\s*\n/).map(block => {
-      const lines = block.trim().split('\n').map(l => l.trim()).filter(Boolean);
-      if (lines.length < 1) return null;
-      const username = lines[0].replace(/^@/, '');
-      const followers = lines[1] ? Number(lines[1].replace(/[^0-9]/g, '')) || 0 : 0;
-      return username ? { username, followers } : null;
-    }).filter(Boolean) as { username: string; followers: number }[];
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const results: { username: string; followers: number }[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      const username = lines[i].replace(/^@/, '').trim();
+      if (!username) { i++; continue; }
+      const next = lines[i + 1];
+      const isNumber = next && /^\d+$/.test(next.replace(/[,\s]/g, ''));
+      results.push({ username, followers: isNumber ? Number(next.replace(/[^0-9]/g, '')) : 0 });
+      i += isNumber ? 2 : 1;
+    }
+    return results;
   };
 
   const handleBulkAdd = async () => {
