@@ -68,8 +68,9 @@ router.post('/hashtag-search', async (req, res) => {
     // Step 3 — compute avg reel views and apply filters
     const results = profiles
       .map((p: any) => {
+        // Apify returns type as "GraphVideo", "Video", or has videoViewCount set — check all
         const reels = (p.latestPosts || []).filter(
-          (post: any) => post.type === 'Video' && (post.videoViewCount || 0) > 0
+          (post: any) => (post.videoViewCount || 0) > 0
         );
         const avgReelViews = reels.length
           ? Math.round(reels.reduce((s: number, post: any) => s + post.videoViewCount, 0) / reels.length)
@@ -115,7 +116,7 @@ router.get('/profile', async (req, res) => {
 
     const p = profiles[0];
     const reels = (p.latestPosts || []).filter(
-      (post: any) => post.type === 'Video' && (post.videoViewCount || 0) > 0
+      (post: any) => (post.videoViewCount || 0) > 0
     );
     const avgReelViews = reels.length
       ? Math.round(reels.reduce((s: number, post: any) => s + post.videoViewCount, 0) / reels.length)
