@@ -1,8 +1,39 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { getAuthUrl, exchangeCodeForTokens, isGmailConnected, getConnectedMembers } from '../services/gmail';
 import db from '../db';
 
+function makeToken(password: string, email: string) {
+  return crypto.createHash('sha256').update(password + email + 'influencer-dash').digest('hex');
+}
+
 const router = Router();
+
+// POST /api/auth/login
+router.post('/login', (req, res) => {
+  const adminPassword = process.env.ADMIN_PASSWORD || '';
+  const adminEmail = process.env.ADMIN_EMAIL || 'danielchonggoonhin@gmail.com';
+
+  // If no password set (local dev), auto-approve
+  if (!adminPassword) return res.json({ token: 'dev' });
+
+  const { email, password } = req.body;
+  if (email !== adminEmail || password !== adminPassword) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+  res.json({ token: makeToken(adminPassword, adminEmail) });
+});
+
+// GET /api/auth/verify
+router.get('/verify', (req, res) => {
+  const adminPassword = process.env.ADMIN_PASSWORD || '';
+  const adminEmail = process.env.ADMIN_EMAIL || 'danielchonggoonhin@gmail.com';
+
+  if (!adminPassword) return res.json({ valid: true }); // local dev — no auth required
+
+  const token = req.headers['x-auth-token'] as string;
+  res.json({ valid: token === makeToken(adminPassword, adminEmail) });
+});
 
 // Pass team_member_id as query param so the OAuth state carries it through the flow
 router.get('/gmail/url', (req, res) => {

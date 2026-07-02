@@ -75,6 +75,9 @@ export default function Outreach() {
   const [addLoading, setAddLoading] = useState(false);
   const [lookupInput, setLookupInput] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [addMode, setAddMode] = useState<'single' | 'bulk'>('single');
+  const [bulkText, setBulkText] = useState('');
+  const [bulkLoading, setBulkLoading] = useState(false);
   const [editingInfluencer, setEditingInfluencer] = useState<any | null>(null);
   const [editForm, setEditForm] = useState(BLANK_INF);
   const [editLoading, setEditLoading] = useState(false);
@@ -238,6 +241,35 @@ export default function Outreach() {
     } finally {
       setLookupLoading(false);
     }
+  };
+
+  const parseBulk = (text: string) => {
+    return text.split(/\n\s*\n/).map(block => {
+      const lines = block.trim().split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length < 1) return null;
+      const username = lines[0].replace(/^@/, '');
+      const followers = lines[1] ? Number(lines[1].replace(/[^0-9]/g, '')) || 0 : 0;
+      return username ? { username, followers } : null;
+    }).filter(Boolean) as { username: string; followers: number }[];
+  };
+
+  const handleBulkAdd = async () => {
+    const entries = parseBulk(bulkText);
+    if (!entries.length) return showToast('No valid entries found', 'error');
+    setBulkLoading(true);
+    let added = 0;
+    for (const e of entries) {
+      try {
+        await createInfluencer({ name: e.username, platform: addForm.platform, username: e.username, followers: e.followers, avg_reel_views: 0, category: '', country: '' });
+        added++;
+      } catch { /* skip duplicates/errors */ }
+    }
+    showToast(`Added ${added} of ${entries.length} influencers`, 'success');
+    setBulkText('');
+    setShowAddModal(false);
+    setAddMode('single');
+    setBulkLoading(false);
+    load();
   };
 
   const handleAddInfluencer = async () => {
@@ -847,59 +879,103 @@ export default function Outreach() {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-900">Add Influencer</h3>
-              <button onClick={() => { setShowAddModal(false); setLookupInput(''); setAddForm(BLANK_INF); }} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
-            </div>
-
-            {/* Username lookup */}
-            {igStatus?.configured && (
-              <div className="px-5 pt-4 pb-3 border-b border-slate-100 bg-slate-50 rounded-t-none">
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Lookup by Instagram username <span className="text-slate-400 font-normal">— auto-fills the form</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    className="input flex-1 text-sm"
-                    placeholder="@username or username"
-                    value={lookupInput}
-                    onChange={e => setLookupInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleLookupUsername()}
-                  />
-                  <button
-                    onClick={handleLookupUsername}
-                    disabled={lookupLoading || !lookupInput.trim()}
-                    className="btn-primary px-3 flex items-center gap-1.5 text-sm shrink-0"
-                  >
-                    {lookupLoading ? <RefreshCw size={13} className="animate-spin" /> : <Search size={13} />}
-                    Lookup
-                  </button>
+              <div className="flex items-center gap-3">
+                <h3 className="font-semibold text-slate-900">Add Influencer</h3>
+                <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs">
+                  <button onClick={() => setAddMode('single')} className={`px-3 py-1 rounded-md font-medium transition-colors ${addMode === 'single' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Single</button>
+                  <button onClick={() => setAddMode('bulk')} className={`px-3 py-1 rounded-md font-medium transition-colors ${addMode === 'bulk' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Bulk</button>
                 </div>
               </div>
-            )}
+              <button onClick={() => { setShowAddModal(false); setLookupInput(''); setAddForm(BLANK_INF); setBulkText(''); setAddMode('single'); }} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+            </div>
 
-            <div className="p-5 space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Username *</label>
-                <input className="input" placeholder="@handle" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Followers</label>
-                <input className="input" type="number" placeholder="0" value={addForm.followers} onChange={e => setAddForm(f => ({ ...f, followers: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Platform</label>
-                <select className="select w-full" value={addForm.platform} onChange={e => setAddForm(f => ({ ...f, platform: e.target.value }))}>
-                  {PLATFORMS.map(p => <option key={p}>{p}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
-              <button onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleAddInfluencer} disabled={addLoading} className="btn-primary flex items-center gap-2">
-                {addLoading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-                Add Influencer
-              </button>
-            </div>
+            {addMode === 'single' ? (
+              <>
+                {/* Username lookup */}
+                {igStatus?.configured && (
+                  <div className="px-5 pt-4 pb-3 border-b border-slate-100 bg-slate-50">
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                      Lookup by Instagram username <span className="text-slate-400 font-normal">— auto-fills the form</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        className="input flex-1 text-sm"
+                        placeholder="@username or username"
+                        value={lookupInput}
+                        onChange={e => setLookupInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleLookupUsername()}
+                      />
+                      <button onClick={handleLookupUsername} disabled={lookupLoading || !lookupInput.trim()} className="btn-primary px-3 flex items-center gap-1.5 text-sm shrink-0">
+                        {lookupLoading ? <RefreshCw size={13} className="animate-spin" /> : <Search size={13} />}
+                        Lookup
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="p-5 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Username *</label>
+                    <input className="input" placeholder="@handle" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Followers</label>
+                    <input className="input" type="number" placeholder="0" value={addForm.followers} onChange={e => setAddForm(f => ({ ...f, followers: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Platform</label>
+                    <select className="select w-full" value={addForm.platform} onChange={e => setAddForm(f => ({ ...f, platform: e.target.value }))}>
+                      {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
+                  <button onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button>
+                  <button onClick={handleAddInfluencer} disabled={addLoading} className="btn-primary flex items-center gap-2">
+                    {addLoading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+                    Add Influencer
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-5 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Platform</label>
+                    <select className="select w-full" value={addForm.platform} onChange={e => setAddForm(f => ({ ...f, platform: e.target.value }))}>
+                      {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Paste list</label>
+                    <div className="text-xs text-slate-400 mb-2">
+                      Format: username on line 1, follower count on line 2, blank line between each:
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3 font-mono text-xs text-slate-500 mb-2 leading-relaxed">
+                      @username1<br />5000<br /><br />@username2<br />3200
+                    </div>
+                    <textarea
+                      className="input font-mono text-sm"
+                      rows={10}
+                      placeholder={'@username1\n5000\n\n@username2\n3200'}
+                      value={bulkText}
+                      onChange={e => setBulkText(e.target.value)}
+                    />
+                    {bulkText.trim() && (
+                      <p className="text-xs text-slate-400 mt-1">
+                        {parseBulk(bulkText).length} influencer{parseBulk(bulkText).length !== 1 ? 's' : ''} detected
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
+                  <button onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button>
+                  <button onClick={handleBulkAdd} disabled={bulkLoading || !bulkText.trim()} className="btn-primary flex items-center gap-2">
+                    {bulkLoading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+                    Add {parseBulk(bulkText).length > 0 ? `${parseBulk(bulkText).length} ` : ''}Influencers
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

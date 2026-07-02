@@ -5,6 +5,19 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Attach auth token to every request
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem('dash_token');
+  if (token) config.headers['x-auth-token'] = token;
+  return config;
+});
+
+// Dashboard login
+export const loginDashboard = (email: string, password: string) =>
+  api.post<{ token: string }>('/auth/login', { email, password });
+export const verifyDashboardToken = () =>
+  api.get<{ valid: boolean }>('/auth/verify');
+
 // Auth
 export const getGmailAuthUrl = (teamMemberId?: string) =>
   api.get<{ url: string }>('/auth/gmail/url', { params: teamMemberId ? { team_member_id: teamMemberId } : {} });

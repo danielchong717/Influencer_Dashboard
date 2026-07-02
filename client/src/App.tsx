@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Layout from './components/layout/Layout';
 import Overview from './pages/Overview';
 import Outreach from './pages/Outreach';
@@ -7,8 +7,9 @@ import ContentSchedule from './pages/ContentSchedule';
 import Payment from './pages/Payment';
 import Report from './pages/Report';
 import LongTermPartners from './pages/LongTermPartners';
+import Login from './pages/Login';
 import { useAppStore } from './store';
-import { getCampaigns, getGmailStatus } from './lib/api';
+import { getCampaigns, getGmailStatus, verifyDashboardToken } from './lib/api';
 
 function PageContent() {
   const { activeTab } = useAppStore();
@@ -26,6 +27,13 @@ function PageContent() {
 
 export default function App() {
   const { setCampaigns, setActiveCampaign, setGmailConnected, showToast } = useAppStore();
+  const [authed, setAuthed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    verifyDashboardToken()
+      .then(r => setAuthed(r.data.valid))
+      .catch(() => setAuthed(false));
+  }, []);
 
   useEffect(() => {
     // Load campaigns
@@ -55,6 +63,14 @@ export default function App() {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
+
+  if (authed === null) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  if (!authed) return <Login onLogin={() => setAuthed(true)} />;
 
   return (
     <Layout>
