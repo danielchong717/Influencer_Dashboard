@@ -7,7 +7,7 @@ import {
   getOutreach, getOutreachAnalytics, sendOutreachEmails, updateOutreachStatus,
   getEmailTemplates, getFollowUps, sendFollowUp, createInfluencer, updateInfluencer,
   deleteInfluencer, updateEmailTemplate, createEmailTemplate, deleteEmailTemplate,
-  getInstagramStatus, searchInstagramHashtags,
+  getInstagramStatus, searchInstagramHashtags, lookupInstagramProfile,
 } from '../lib/api';
 import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
@@ -73,6 +73,8 @@ export default function Outreach() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState(BLANK_INF);
   const [addLoading, setAddLoading] = useState(false);
+  const [lookupInput, setLookupInput] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
   const [editingInfluencer, setEditingInfluencer] = useState<any | null>(null);
   const [editForm, setEditForm] = useState(BLANK_INF);
   const [editLoading, setEditLoading] = useState(false);
@@ -211,6 +213,30 @@ export default function Outreach() {
       load();
     } catch {
       showToast('Failed to delete influencer', 'error');
+    }
+  };
+
+  const handleLookupUsername = async () => {
+    const username = lookupInput.replace('@', '').trim();
+    if (!username) return;
+    setLookupLoading(true);
+    try {
+      const res = await lookupInstagramProfile(username);
+      const p = res.data as any;
+      setAddForm(f => ({
+        ...f,
+        name: p.name || p.username,
+        platform: 'Instagram',
+        username: p.username,
+        followers: String(p.followers_count || ''),
+        avg_reel_views: String(p.avg_reel_views || ''),
+      }));
+      setLookupInput('');
+      showToast(`Loaded @${p.username}`, 'success');
+    } catch (e: any) {
+      showToast(e.response?.data?.error || 'Profile not found', 'error');
+    } finally {
+      setLookupLoading(false);
     }
   };
 
@@ -452,7 +478,7 @@ export default function Outreach() {
                   <option value="">All Members</option>
                   {members.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
-                <button onClick={() => setShowAddModal(true)} className="btn-secondary flex items-center gap-1.5">
+                <button onClick={() => { setAddForm(BLANK_INF); setLookupInput(''); setShowAddModal(true); }} className="btn-secondary flex items-center gap-1.5">
                   <Plus size={14} /> Add Influencer
                 </button>
                 <button
@@ -821,8 +847,35 @@ export default function Outreach() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h3 className="font-semibold text-slate-900">Add Influencer</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+              <button onClick={() => { setShowAddModal(false); setLookupInput(''); setAddForm(BLANK_INF); }} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
             </div>
+
+            {/* Username lookup */}
+            {igStatus?.configured && (
+              <div className="px-5 pt-4 pb-3 border-b border-slate-100 bg-slate-50 rounded-t-none">
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                  Lookup by Instagram username <span className="text-slate-400 font-normal">— auto-fills the form</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    className="input flex-1 text-sm"
+                    placeholder="@username or username"
+                    value={lookupInput}
+                    onChange={e => setLookupInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleLookupUsername()}
+                  />
+                  <button
+                    onClick={handleLookupUsername}
+                    disabled={lookupLoading || !lookupInput.trim()}
+                    className="btn-primary px-3 flex items-center gap-1.5 text-sm shrink-0"
+                  >
+                    {lookupLoading ? <RefreshCw size={13} className="animate-spin" /> : <Search size={13} />}
+                    Lookup
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="p-5 space-y-3">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Name *</label>
