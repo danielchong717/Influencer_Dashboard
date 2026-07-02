@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { DndContext, DragOverlay, closestCorners, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
+import { DndContext, DragOverlay, closestCorners, useSensor, useSensors, PointerSensor, useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Calendar, Users, GripVertical, AlertTriangle, X, Check } from 'lucide-react';
@@ -70,6 +70,7 @@ function KanbanCard({ card, onDateClick }: { card: PipelineCard; onDateClick: (c
 }
 
 function KanbanColumn({ stage, cards, onDateClick }: { stage: PipelineStage; cards: PipelineCard[]; onDateClick: (c: PipelineCard) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: stage });
   const overdueCount = cards.filter(c => c.is_overdue || (c.publication_date && daysUntil(c.publication_date) < 0 && stage !== 'published')).length;
   return (
     <div className="kanban-column">
@@ -84,14 +85,16 @@ function KanbanColumn({ stage, cards, onDateClick }: { stage: PipelineStage; car
           <span className="text-xs text-slate-400 font-medium">{cards.length}</span>
         </div>
       </div>
-      <SortableContext items={cards.map(c => c.id)} strategy={verticalListSortingStrategy}>
-        {cards.map(card => (
-          <KanbanCard key={card.id} card={card} onDateClick={onDateClick} />
-        ))}
-      </SortableContext>
-      {cards.length === 0 && (
-        <div className="text-center py-6 text-xs text-slate-300">Drop cards here</div>
-      )}
+      <div ref={setNodeRef} className={`flex-1 min-h-[80px] rounded-lg transition-colors ${isOver ? 'bg-blue-50 ring-2 ring-blue-200' : ''}`}>
+        <SortableContext items={cards.map(c => c.id)} strategy={verticalListSortingStrategy}>
+          {cards.map(card => (
+            <KanbanCard key={card.id} card={card} onDateClick={onDateClick} />
+          ))}
+        </SortableContext>
+        {cards.length === 0 && (
+          <div className={`text-center py-6 text-xs ${isOver ? 'text-blue-400' : 'text-slate-300'}`}>Drop cards here</div>
+        )}
+      </div>
     </div>
   );
 }
