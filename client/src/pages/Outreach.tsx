@@ -241,11 +241,12 @@ export default function Outreach() {
   };
 
   const handleAddInfluencer = async () => {
-    if (!addForm.name || !addForm.platform) return showToast('Name and platform are required', 'error');
+    if (!addForm.username) return showToast('Username is required', 'error');
     setAddLoading(true);
     try {
-      await createInfluencer({ ...addForm, followers: Number(addForm.followers) || 0, avg_reel_views: Number(addForm.avg_reel_views) || 0 });
-      showToast(`${addForm.name} added!`, 'success');
+      const name = addForm.name || addForm.username.replace('@', '');
+      await createInfluencer({ ...addForm, name, followers: Number(addForm.followers) || 0, avg_reel_views: Number(addForm.avg_reel_views) || 0 });
+      showToast(`@${addForm.username} added!`, 'success');
       setAddForm(BLANK_INF);
       setShowAddModal(false);
       load();
@@ -878,44 +879,18 @@ export default function Outreach() {
 
             <div className="p-5 space-y-3">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Name *</label>
-                <input className="input" placeholder="e.g. Sarah Tan" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Platform *</label>
-                  <select className="select w-full" value={addForm.platform} onChange={e => setAddForm(f => ({ ...f, platform: e.target.value }))}>
-                    {PLATFORMS.map(p => <option key={p}>{p}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Username / Handle</label>
-                  <input className="input" placeholder="@handle" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
-                </div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Username *</label>
+                <input className="input" placeholder="@handle" value={addForm.username} onChange={e => setAddForm(f => ({ ...f, username: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email (optional)</label>
-                <input className="input" type="email" placeholder="influencer@gmail.com" value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} />
+                <label className="block text-sm font-medium text-slate-700 mb-1">Followers</label>
+                <input className="input" type="number" placeholder="0" value={addForm.followers} onChange={e => setAddForm(f => ({ ...f, followers: e.target.value }))} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Followers</label>
-                  <input className="input" type="number" placeholder="0" value={addForm.followers} onChange={e => setAddForm(f => ({ ...f, followers: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Avg Reel Views</label>
-                  <input className="input" type="number" placeholder="0" value={addForm.avg_reel_views} onChange={e => setAddForm(f => ({ ...f, avg_reel_views: e.target.value }))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                  <input className="input" placeholder="e.g. Food, Lifestyle" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
-                  <input className="input" placeholder="e.g. MY" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Platform</label>
+                <select className="select w-full" value={addForm.platform} onChange={e => setAddForm(f => ({ ...f, platform: e.target.value }))}>
+                  {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+                </select>
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
