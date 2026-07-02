@@ -311,6 +311,9 @@ export default function Outreach() {
     setShowTemplateManager(false);
   };
 
+  const reloadTemplates = () =>
+    getEmailTemplates().then(r => setTemplates(r.data)).catch(() => {});
+
   const handleSaveTemplate = async () => {
     if (!editingTemplate) return;
     setTemplateSaving(true);
@@ -319,12 +322,14 @@ export default function Outreach() {
         await createEmailTemplate({ name: editingTemplate.name, subject: editingTemplate.subject || '', body: editingTemplate.body });
         showToast('Template created', 'success');
       } else {
-        await updateEmailTemplate(editingTemplate.id, { name: editingTemplate.name, subject: editingTemplate.subject, body: editingTemplate.body });
+        await updateEmailTemplate(editingTemplate.id, { name: editingTemplate.name, subject: editingTemplate.subject || '', body: editingTemplate.body });
         showToast('Template saved', 'success');
       }
       setEditingTemplate(null);
       setIsNewTemplate(false);
-      load();
+      reloadTemplates();
+    } catch (e: any) {
+      showToast(e.response?.data?.error || 'Failed to save template', 'error');
     } finally {
       setTemplateSaving(false);
     }
