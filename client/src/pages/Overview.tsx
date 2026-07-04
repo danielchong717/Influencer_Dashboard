@@ -2,9 +2,9 @@ import React, { useEffect, useState, useCallback, createContext, useContext } fr
 import {
   Send, MessageSquareReply, Clapperboard, DollarSign, RefreshCw, Copy, Check,
   Store, CalendarClock, AlertTriangle, ListChecks, CalendarPlus, ChevronDown,
-  Eye, X, Search, CheckCircle2, Circle, RotateCcw, WifiOff, Pencil, Lock,
+  Eye, X, Search, CheckCircle2, Circle, RotateCcw, WifiOff, Pencil, Lock, Zap, Instagram, Mail,
 } from 'lucide-react';
-import { getFunnel, markFunnelAction, sendFunnelReply, resyncFunnel, editFunnelRow, resolveFunnelIssue } from '../lib/api';
+import { getFunnel, markFunnelAction, sendFunnelReply, resyncFunnel, editFunnelRow, resolveFunnelIssue, startFetchUpstream, fetchUpstreamStatus } from '../lib/api';
 import { useAppStore } from '../store';
 
 // Lets any row's RowLinks open the edit modal without threading a callback through every
@@ -56,8 +56,52 @@ function dayLabel(iso: string): string {
 
 function Chan({ c }: { c: string }) {
   if (!c) return null;
-  const map: Record<string, string> = { IG: 'bg-pink-100 text-pink-700', '邮件': 'bg-blue-100 text-blue-700', '小红书': 'bg-red-100 text-red-700' };
-  return <span className={`badge text-[10px] px-1.5 py-0 ${map[c] || 'bg-slate-100 text-slate-500'}`}>{c}</span>;
+  const map: Record<string, { cls: string; Icon: any }> = {
+    'IG': { cls: 'bg-pink-100 text-pink-700', Icon: Instagram },
+    '邮件': { cls: 'bg-blue-100 text-blue-700', Icon: Mail },
+    '小红书': { cls: 'bg-red-100 text-red-700', Icon: null },
+  };
+  const m = map[c] || { cls: 'bg-slate-100 text-slate-500', Icon: null };
+  const Icon = m.Icon;
+  return (
+    <span className={`badge text-[10px] px-1.5 py-0 inline-flex items-center gap-0.5 ${m.cls}`}>
+      {Icon && <Icon size={10} />}{c}
+    </span>
+  );
+}
+
+// which IG account / restaurant a conversation is on — so you know which login to reply from.
+// Color-coded; the two "100 Feast…" spellings collapse to one. Edit ACCT_MAP to add accounts.
+const ACCT_MAP: Record<string, { label: string; cls: string }> = {
+  '100 Feast & Lounge': { label: '100 Feast Lounge', cls: 'bg-sky-100 text-sky-700' },
+  '100 Feast Lounge & Bar': { label: '100 Feast Lounge', cls: 'bg-sky-100 text-sky-700' },
+  '100 Feast 萬豪大酒家': { label: '100 Feast 万豪', cls: 'bg-violet-100 text-violet-700' },
+  'Xiangbobo': { label: 'Xiangbobo', cls: 'bg-orange-100 text-orange-700' },
+  '季北川': { label: '季北川', cls: 'bg-green-100 text-green-700' },
+  'Ji Bei Chuan Authentic Asian Noodles': { label: '季北川', cls: 'bg-green-100 text-green-700' },
+};
+function acctStyle(r?: string) {
+  return ACCT_MAP[r || ''] || { label: r && r !== 'Unassigned' ? r : '未分配', cls: 'bg-slate-100 text-slate-500' };
+}
+function Acct({ restaurant }: { restaurant?: string }) {
+  const a = acctStyle(restaurant);
+  return <span className={`badge text-[10px] px-1.5 py-0 font-medium ${a.cls}`}>{a.label}</span>;
+}
+function AcctLegend() {
+  const items = [
+    { label: '100 Feast Lounge', cls: 'bg-sky-100 text-sky-700' },
+    { label: '100 Feast 万豪', cls: 'bg-violet-100 text-violet-700' },
+    { label: 'Xiangbobo', cls: 'bg-orange-100 text-orange-700' },
+    { label: '季北川', cls: 'bg-green-100 text-green-700' },
+    { label: '未分配', cls: 'bg-slate-100 text-slate-500' },
+  ];
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap">
+      <span className="font-medium">账号:</span>
+      {items.map((i) => <span key={i.label} className={`badge text-[10px] px-1.5 py-0 font-medium ${i.cls}`}>{i.label}</span>)}
+      <span className="text-slate-400">— 回复前看颜色，知道用哪个 IG 登录</span>
+    </div>
+  );
 }
 
 // who on our team is handling this (from the Feishu 负责人 field)
@@ -129,14 +173,14 @@ function SchedRow({ it, onView, done, onToggle }: any) {
       <Done on={done} onClick={onToggle} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`font-medium text-slate-800 truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
+          <Acct restaurant={it.restaurant} /><span className={`font-medium text-slate-800 truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
           <Handle it={it} />
           <Chan c={it.channel} /><Owner name={it.owner} />
           {tag && <span className={`badge ${tag.c}`}>{tag.t}</span>}
           <RowLinks it={it} />
         </div>
         <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-          <CalendarClock size={12} /> {it.visit_date} {it.visit_time} · 🍴 {it.restaurant}
+          <CalendarClock size={12} /> {it.visit_date} {it.visit_time}
         </div>
       </div>
       {it.scheduled_message && (
@@ -166,7 +210,7 @@ function ActionRow({ it, right, done, onToggle, onDraft, waiting }: any) {
     <div className={`px-4 py-2 border-t border-slate-100 ${done ? 'opacity-50' : ''}`}>
       <div className="flex items-center gap-2 flex-wrap">
         <Done on={done} onClick={onToggle} />
-        <span className={`font-medium text-slate-800 text-sm truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
+        <Acct restaurant={it.restaurant} /><span className={`font-medium text-slate-800 text-sm truncate ${done ? 'line-through' : ''}`}>{it.name}</span>
         <Handle it={it} />
         <Chan c={it.channel} /><Owner name={it.owner} />
         <RowLinks it={it} />
@@ -213,11 +257,11 @@ function ArrivalRow({ it, big, showDay }: { it: any; big?: boolean; showDay?: bo
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className={`font-semibold text-slate-800 truncate ${big ? '' : 'text-sm'}`}>{it.name}</span>
+          <Acct restaurant={it.restaurant} /><span className={`font-semibold text-slate-800 truncate ${big ? '' : 'text-sm'}`}>{it.name}</span>
           <Handle it={it} />
           <Chan c={it.channel} />
         </div>
-        <div className="text-xs text-slate-500 truncate">🍴 {it.restaurant || '未分配'}{it.owner ? ` · ${it.owner}` : ''}</div>
+        {it.owner ? <div className="text-xs text-slate-500 truncate">👤 {it.owner}</div> : null}
       </div>
       <RowLinks it={it} />
     </div>
@@ -356,7 +400,7 @@ function IssueSection({ issues, onEdit, onFix, onResolve, fixing, resolving }: a
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className={`badge ${s.tag}`}>{s.label}</span>
                   <span className="font-semibold text-sm text-slate-800">{it.title}</span>
-                  <span className="text-xs text-slate-500">· {it.name}</span>
+                  <Acct restaurant={it.restaurant} /><span className="text-xs text-slate-500">{it.name}</span>
                   <Chan c={it.channel} />
                 </div>
                 <div className="text-xs text-slate-500 truncate mt-0.5">{it.detail}</div>
@@ -412,6 +456,7 @@ export default function Overview() {
   const [edit, setEdit] = useState<any>(null);        // #3: row being edited (餐补/时间/状态)
   const [fixing, setFixing] = useState<string | null>(null);  // chat_id mid 一键修
   const [resolving, setResolving] = useState<string | null>(null);  // issue_id mid 已解决
+  const [fetchPhase, setFetchPhase] = useState<string>('idle');     // Tier 2 ⚡抓最新 progress
 
   const load = useCallback((silent = false) => {
     silent ? setRefreshing(true) : setLoading(true);
@@ -439,6 +484,35 @@ export default function Overview() {
       .catch((e: any) => showToast(e?.response?.data?.error || '修正失败', 'error'))
       .finally(() => setFixing(null));
   };
+
+  // Tier 2: ⚡抓最新 — trigger the upstream run (source→Feishu), poll till done, then reload.
+  // The server does the work in the background; we just poll the cheap status endpoint for UI.
+  const fetchUpstream = useCallback(() => {
+    setFetchPhase('triggering');
+    startFetchUpstream()
+      .then((r) => {
+        if (r.data?.phase === 'error') { showToast(r.data.error || '触发失败', 'error'); setFetchPhase('idle'); return; }
+        const t0 = Date.now();
+        const poll = setInterval(async () => {
+          try {
+            const s = (await fetchUpstreamStatus()).data;
+            setFetchPhase(s.phase);
+            if (s.phase === 'done') {
+              clearInterval(poll); showToast('已抓到最新', 'success'); load(true);
+              // 冷却 2.5 分钟：每次现抓=1 次付费云端运行，整点 cron 本来就会抓，
+              // 防多人/手抖连点白烧 Actions 分钟（in-flight 锁只防并发不防连点）
+              setFetchPhase('cooldown');
+              setTimeout(() => setFetchPhase('idle'), 150000);
+            } else if (s.phase === 'error') {
+              clearInterval(poll); showToast(s.error || '抓取失败', 'error'); setFetchPhase('idle');
+            } else if (Date.now() - t0 > 7 * 60 * 1000) {   // 压过服务端 ~6 分钟上限，尽量等到终态
+              clearInterval(poll); setFetchPhase('idle'); showToast('抓取超时，稍后整点同步会补上', 'error');
+            }
+          } catch { /* transient — keep polling */ }
+        }, 8000);
+      })
+      .catch((e: any) => { showToast(e?.response?.data?.error || '触发失败', 'error'); setFetchPhase('idle'); });
+  }, [load]);
 
   // Phase 2: mark an AI-raised issue resolved (no field change — e.g. false alarm / handled in Feishu)
   const resolveAiIssue = (issueId: string) => {
@@ -536,6 +610,12 @@ export default function Overview() {
           <h1 className="text-xl font-bold text-slate-900">网红合作进度</h1>
           <p className="text-sm text-slate-500">
             {activeCampaign ? activeCampaign.name : '全部餐厅'} · <span className="font-semibold text-slate-700">{todoCount} 件待办</span> · 共 {data.total} 个对话
+            {(data.staleHidden > 0 || data.unassigned > 0) && (
+              <span className="ml-2 badge bg-slate-100 text-slate-400 text-[10px]"
+                title={`没显示在看板上的：${data.staleHidden > 0 ? `搁置>15天自动隐藏 ${data.staleHidden} 条（飞书原始数据仍在）` : ''}${data.staleHidden > 0 && data.unassigned > 0 ? '；' : ''}${data.unassigned > 0 ? `未分配餐厅 ${data.unassigned} 条（按餐厅筛选时不计入，见分店概览）` : ''}`}>
+                未显示 {(data.staleHidden || 0) + (data.unassigned || 0)} 条 ⓘ
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -552,16 +632,30 @@ export default function Overview() {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜博主…"
               className="input pl-7 py-1.5 w-32 text-sm" />
           </div>
-          <span className={`text-xs ${sync.cls}`}>同步 {sync.text}{refreshing && ' ·刷新中'}</span>
-          <span className="badge bg-slate-100 text-slate-500">只读·飞书</span>
-          <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => setShowStats((v) => !v)}>
+          <span className={`text-xs ${sync.cls}`} title="上次「飞书→看板」同步的时间——飞书本身由云端每小时自动更新，与本机无关">飞书同步 {sync.text}{refreshing && ' ·刷新中'}</span>
+          <span className="badge bg-slate-100 text-slate-500 hidden md:inline-flex">只读·飞书</span>
+          <button className="btn-secondary hidden md:flex items-center gap-1 text-xs" onClick={() => setShowStats((v) => !v)}>
             <ChevronDown size={13} className={`transition-transform ${showStats ? '' : '-rotate-90'}`} />数据
           </button>
-          <button className="btn-secondary flex items-center gap-1" onClick={refresh} disabled={refreshing}>
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />刷新
+          <button className="btn-secondary flex items-center gap-1" onClick={refresh} disabled={refreshing}
+            title="从飞书拉最新到看板 · 免费·秒级。注意：博主刚回的新消息要先进飞书（每小时自动/⚡现抓）才拉得到">
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />刷新·飞书
           </button>
+          {(() => {
+            const fetching = fetchPhase !== 'idle';
+            const label: Record<string, string> = { triggering: '触发中…', running: '云端处理中…', syncing: '同步中…', done: '完成', cooldown: '刚抓过·稍候' };
+            return (
+              <button className="btn-secondary flex items-center gap-1" onClick={fetchUpstream} disabled={fetching}
+                title="连 IG/邮件源头一起现抓 → 飞书 → 看板 · 约 2 分钟 · 每次计 1 次云端运行（整点也会自动抓，别连点）">
+                <Zap size={14} className={fetching && fetchPhase !== 'cooldown' ? 'animate-pulse text-amber-500' : ''} />{fetching ? (label[fetchPhase] || '抓取中…') : '现抓IG/邮件'}
+              </button>
+            );
+          })()}
         </div>
       </div>
+
+      {/* account legend — which color = which IG account, so you know which login to reply from */}
+      <AcctLegend />
 
       {/* ⚠️ 需要你处理 — exceptions needing a decision, pinned above everything */}
       {data.issues?.length > 0 && (
@@ -577,7 +671,7 @@ export default function Overview() {
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <CalendarClock size={18} className="text-rose-600" />
               <h2 className="text-base font-bold text-slate-900">近期到店</h2>
-              <span className="text-xs text-slate-400">谁来 · 几点 · 哪家店 — 未来 7 天，每天先看这里</span>
+              <span className="text-xs text-slate-400">谁来 · 几点 · 哪家店 — 未来 7 天日程（同一批人也在下方待办中，不是额外名单）</span>
               <span className="badge ml-auto bg-rose-100 text-rose-700">{totalWeek} 位</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
@@ -645,6 +739,7 @@ export default function Overview() {
           <ListChecks size={18} className="text-slate-700" />
           <h2 className="text-base font-bold text-slate-900">我的下一步</h2>
           <span className="text-xs text-slate-400">回复 → 定时间 → 发邀约 → 催发帖 → 付款 · 点 ✓ 标已处理（划掉留底，不消失）</span>
+          {/* 搁置>15天的隐藏计数已并入页头「未显示」chip——一个地方回答"我没看到什么" */}
           {doneCount > 0 && (
             <button onClick={() => setHideDone((v) => !v)} className="ml-auto text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1">
               <RotateCcw size={12} />{hideDone ? '显示' : '隐藏'}已处理 {doneCount}
@@ -652,21 +747,18 @@ export default function Overview() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {/* 单列全宽：①→⑤ 顺着往下读（原 2 列会把流程折成 ①②/③④/⑤，读序断） */}
+        <div className="grid grid-cols-1 gap-4 items-start">
           <TodoCard step="①" icon={<MessageSquareReply size={16} />} title="待回复" sub="博主发来消息，球在我方 → 去回他" count={liveCount(t.reply_needed)} empty={view(t.reply_needed).length === 0} accent="text-blue-600" headerBg="bg-blue-50" badge="bg-blue-100 text-blue-700">
             {view(t.reply_needed).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "reply")} onDraft={onDraft} waiting />)}
           </TodoCard>
 
-          <TodoCard step="②" icon={<CalendarPlus size={16} />} title="待定到店时间" sub="已谈成，需我方敲定到店时间" count={liveCount(t.set_time)} empty={view(t.set_time).length === 0} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
+          <TodoCard step="②" icon={<CalendarPlus size={16} />} title="定到店时间" sub="已谈成，需我方敲定到店时间" count={liveCount(t.set_time)} empty={view(t.set_time).length === 0} accent="text-sky-600" headerBg="bg-sky-50" badge="bg-sky-100 text-sky-700">
             {view(t.set_time).map((it: any) => <ActionRow key={it.chat_id} it={it} done={isHandled(it)} onToggle={() => mark(it, "settime")} />)}
           </TodoCard>
 
-          <TodoCard step="③" icon={<Send size={16} />} title="发邀约确认" sub="已排期，发确认消息给博主（先看再复制）" count={liveCount(t.scheduled_msg)} empty={sched.length === 0} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
-            {schedUrgent.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => mark(it, "invite")} />)}
-            {schedUrgent.length > 0 && schedRest.length > 0 && (
-              <div className="px-4 py-1 text-[11px] font-medium text-slate-400 bg-slate-50 border-t border-slate-100">其余已排期（待确认）</div>
-            )}
-            {schedRest.map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => mark(it, "invite")} />)}
+          <TodoCard step="③" icon={<Send size={16} />} title="发邀约确认" sub="已排期，发确认消息给博主（先看再复制）· 今明置顶" count={liveCount(t.scheduled_msg)} empty={sched.length === 0} accent="text-amber-600" headerBg="bg-amber-50" badge="bg-amber-100 text-amber-700">
+            {[...schedUrgent, ...schedRest].map((it: any) => <SchedRow key={it.chat_id} it={it} onView={onView} done={isHandled(it)} onToggle={() => mark(it, "invite")} />)}
           </TodoCard>
 
           <TodoCard step="④" icon={<Clapperboard size={16} />} title="催发帖" sub="已到店，还没发帖 → 去催" count={liveCount(t.to_post)} empty={view(t.to_post).length === 0} accent="text-violet-600" headerBg="bg-violet-50" badge="bg-violet-100 text-violet-700">
@@ -692,7 +784,7 @@ export default function Overview() {
               const pc: Record<string, string> = { reel: 'bg-pink-100 text-pink-700', story: 'bg-amber-100 text-amber-700', post: 'bg-slate-100 text-slate-600' };
               return (
                 <div key={i} className="px-4 py-2 flex items-center gap-2 text-sm flex-wrap">
-                  <span className="font-medium text-slate-800 truncate">{it.name}</span>
+                  <Acct restaurant={it.restaurant} /><span className="font-medium text-slate-800 truncate">{it.name}</span>
                   <Chan c={it.channel} /><Owner name={it.owner} />
                   {it.post_type && <span className={`badge text-[10px] px-1.5 py-0 ${pc[it.post_type] || 'bg-slate-100 text-slate-600'}`}>{it.post_type}</span>}
                   <span className="text-xs text-slate-400">{it.pub_date || ''}</span>

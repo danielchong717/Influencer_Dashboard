@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db from '../db';
 import { FUNNEL_ORDER, FUNNEL_LABELS, markAction, syncFromFeishu, editRecordFields, resolveIssue } from '../services/feishuSync';
 import { sendIgMessage } from '../services/unipile';
+import { startUpstreamFetch, upstreamFetchStatus } from '../services/upstream';
 
 const router = Router();
 
@@ -83,6 +84,16 @@ router.post('/issue/resolve', async (req, res) => {
   res.status(r.ok ? 200 : 502).json(r);
 });
 
+// Tier 2: ⚡抓最新 — trigger the upstream run now (source→Feishu), then resync. Fire-and-poll:
+// POST starts it (returns immediately), GET reports progress. Not localhost-gated (team on the
+// public URL needs it); the single in-flight job in upstream.ts prevents spamming Actions runs.
+router.post('/fetch-upstream', async (_req, res) => {
+  res.json(await startUpstreamFetch());
+});
+router.get('/fetch-upstream/status', (_req, res) => {
+  res.json(upstreamFetchStatus());
+});
+
 function funnelExists(): boolean {
   return !!db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='ig_funnel'`).get();
 }
@@ -140,18 +151,33 @@ router.get('/', (req, res) => {
   // for 待回复: how long the ball's been in OUR court = since the influencer's last message.
   // Oldest waiting first (fall back to last_modified when the inbound time isn't recorded yet).
   const byWaiting = (a: any, b: any) => (a.last_inbound || a.last_modified || '9999').localeCompare(b.last_inbound || b.last_modified || '9999');
+  // Aging cutoff — drop items stuck in an action queue more than STALE_DAYS. No point keeping the
+  // ones that have waited hundreds of days; they're noise. `staleHidden` is surfaced so it's never
+  // a silent truncation. Exemptions: 待付款 (a debt doesn't age out) and any upcoming visit (never hide
+  // someone who's actually coming). The age metric per queue matches what that queue is "waiting on".
+  const STALE_DAYS = 15;
+  const daysAgo = (iso?: string | null) => iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : 0;
+  const daysSinceVisit = (d?: string | null) => d ? (Date.now() - new Date(d + 'T00:00:00').getTime()) / 86400000 : 0;
+  let staleHidden = 0;
+  const fresh = (arr: any[], age: (r: any) => number) => {
+    const kept = arr.filter((r) => age(r) <= STALE_DAYS);
+    staleHidden += arr.length - kept.length;
+    return kept;
+  };
   const todos = {
-    // ONLY 已排期 (an actual time is set) belongs here — you can't send a dated Scheduled
-    // Message without a time. 已敲定待约时间 (agreed, no time yet) stays in the 沟通中 metric.
-    // Soonest visit first; today/tomorrow flagged so the client can pin the day-of reminders.
-    scheduled_msg: rows.filter((r) => r.status_raw === '已排期')
+    // ONLY 已排期 (an actual time is set) belongs here. Keep all upcoming visits regardless of age;
+    // only age out 已排期 that's both not-upcoming AND untouched > 15d (a stale/no-show invite).
+    scheduled_msg: fresh(rows.filter((r) => r.status_raw === '已排期'),
+        (r) => (r.visit_date && r.visit_date >= today) ? 0 : daysAgo(r.last_modified))
       .sort(byVisit)
       .map((r) => ({ ...item(r), is_today: r.visit_date === today, is_tomorrow: r.visit_date === tomorrow })),
-    reply_needed: rows.filter((r) => r.status_raw === '等我们回').sort(byWaiting).map(item),
-    // agreed to collab but no time set yet → our move is to nail down a time
-    set_time: rows.filter((r) => r.status_raw === '已敲定待约时间').sort(byStale).map(item),
-    to_post: rows.filter((r) => ['已到店', '待发 reel', '待发帖'].includes(r.status_raw)).sort(byVisit).map(item),
-    unpaid: rows.filter((r) => r.amount > 0 && !r.paid).sort(byStale).map(item),
+    // 待回复: ball in OUR court > 15d (since influencer's last message) → drop.
+    reply_needed: fresh(rows.filter((r) => r.status_raw === '等我们回'), (r) => daysAgo(r.last_inbound || r.last_modified)).sort(byWaiting).map(item),
+    // 待定到店时间: agreed but untouched > 15d → drop.
+    set_time: fresh(rows.filter((r) => r.status_raw === '已敲定待约时间'), (r) => daysAgo(r.last_modified)).sort(byStale).map(item),
+    // 待发帖: arrived > 15d ago and still no post → drop.
+    to_post: fresh(rows.filter((r) => ['已到店', '待发 reel', '待发帖'].includes(r.status_raw)), (r) => r.visit_date ? daysSinceVisit(r.visit_date) : daysAgo(r.last_modified)).sort(byVisit).map(item),
+    unpaid: rows.filter((r) => r.amount > 0 && !r.paid).sort(byStale).map(item),  // debts never age out
   };
 
   // upcoming arrivals — the daily "who's coming in" agenda. Any conversation with a visit
@@ -270,7 +296,7 @@ router.get('/', (req, res) => {
 
   res.json({
     ready: true, order: FUNNEL_ORDER, labels: FUNNEL_LABELS,
-    total: rows.length, metrics, declined, todos, arrivals, published, payments, byRestaurant, unassigned, restaurants, statuses, issues, lastSync, funnelBar,
+    total: rows.length, metrics, declined, todos, arrivals, published, payments, byRestaurant, unassigned, restaurants, statuses, issues, staleHidden, lastSync, funnelBar,
   });
 });
 

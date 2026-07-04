@@ -81,6 +81,9 @@ export const editFunnelRow = (chat_id: string, fields: Record<string, string>) =
 // Phase 2: resolve an AI-raised issue (optionally applying a field fix first)
 export const resolveFunnelIssue = (issue_id: string, apply?: Record<string, string>) =>
   api.post<any>('/funnel/issue/resolve', { issue_id, apply });
+// Tier 2: trigger the upstream run now (fetch newest IG/email into Feishu), then poll status
+export const startFetchUpstream = () => api.post<any>('/funnel/fetch-upstream');
+export const fetchUpstreamStatus = () => api.get<any>('/funnel/fetch-upstream/status');
 
 // Long-term
 export const getLongTermPartners = () => api.get<any[]>('/longterm');

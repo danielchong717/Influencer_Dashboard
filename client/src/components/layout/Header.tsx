@@ -134,8 +134,9 @@ export default function Header() {
           )}
         </div>
 
-        {/* Gmail status */}
-        {gmailConnected ? (
+        {/* Gmail status — 已隐藏:看板「从面板发外联邮件」功能已关(主从:飞书=唯一源头,
+            邮件博主对接在云端 email/sync.py 跑,与此按钮无关)。把 false 改回 true 即恢复。 */}
+        {false && (gmailConnected ? (
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs border border-green-200">
               <Wifi size={12} />
@@ -151,7 +152,7 @@ export default function Header() {
             <WifiOff size={12} />
             连接 Gmail
           </button>
-        )}
+        ))}
 
         <button className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
           <Bell size={16} />

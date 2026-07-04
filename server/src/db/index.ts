@@ -166,4 +166,19 @@ db.exec(`
   );
 `);
 
+// reconcile()/sync look rows up by these keys once per record — unindexed that's a full-table
+// scan each time (O(N²) once the mirror grows past ~2k rows). long_term_partners.influencer_id
+// is already UNIQUE (auto-indexed).
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_pipeline_influencer ON pipeline(influencer_id);
+  CREATE INDEX IF NOT EXISTS idx_content_influencer ON content_schedule(influencer_id);
+  CREATE INDEX IF NOT EXISTS idx_payments_influencer ON payments(influencer_id);
+  CREATE INDEX IF NOT EXISTS idx_outreach_influencer ON outreach(influencer_id);
+`);
+// feishu_chat_id is added by a later migration (feishuSync/feishuImport); index it once present.
+const _infCols = (db.prepare(`PRAGMA table_info(influencers)`).all() as any[]).map((c) => c.name);
+if (_infCols.includes('feishu_chat_id')) {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_influencers_chat ON influencers(feishu_chat_id)`);
+}
+
 export default db;

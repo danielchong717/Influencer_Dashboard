@@ -13,14 +13,17 @@ const PRIMARY: NavItem[] = [
   { id: 'overview', label: '总览', icon: <LayoutDashboard size={20} />, description: '网红合作进度' },
 ];
 
-// Everything else is the original (heavier) CRM — tucked under a collapsible "更多".
+// The original (heavier) CRM pages read the legacy local SQLite tables, NOT Feishu —
+// their numbers (e.g. 付款) diverge from 总览's Feishu-sourced cards, which erodes trust.
+// Hidden from nav until they're either migrated to the Feishu source or confirmed as a
+// separate workflow. Pages/routes/sync all still exist — restore by re-adding items here.
 // Outreach stays out entirely: outreach + open-tracking is done upstream in Feishu.
 const MORE: NavItem[] = [
-  { id: 'pipeline', label: '流水线', icon: <GitBranch size={20} />, description: '看板阶段' },
-  { id: 'content', label: '内容排期', icon: <Calendar size={20} />, description: '交付与数据' },
-  { id: 'payment', label: '付款', icon: <CreditCard size={20} />, description: '账单与状态' },
-  { id: 'report', label: '报表', icon: <BarChart3 size={20} />, description: '分析与洞察' },
-  { id: 'longterm', label: '长期合作', icon: <Star size={20} />, description: '签约博主' },
+  // { id: 'pipeline', label: '流水线', icon: <GitBranch size={20} />, description: '看板阶段' },
+  // { id: 'content', label: '内容排期', icon: <Calendar size={20} />, description: '交付与数据' },
+  // { id: 'payment', label: '付款', icon: <CreditCard size={20} />, description: '账单与状态' },
+  // { id: 'report', label: '报表', icon: <BarChart3 size={20} />, description: '分析与洞察' },
+  // { id: 'longterm', label: '长期合作', icon: <Star size={20} />, description: '签约博主' },
 ];
 
 const RAIL = 'w-16';        // collapsed footprint (64px) — reclaims space for the board
@@ -78,18 +81,20 @@ export default function Sidebar() {
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto overflow-x-hidden">
         {PRIMARY.map((it) => renderItem(it, mobile))}
 
-        {/* collapsible "更多" — heavier CRM pages, hidden by default */}
-        <button
-          onClick={() => setMoreOpen((v) => !v)}
-          title="更多"
-          className="w-full flex items-center h-12 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
-        >
-          <span className="w-16 flex-shrink-0 flex items-center justify-center">
-            <ChevronDown size={18} className={cn('transition-transform', moreOpen ? '' : '-rotate-90')} />
-          </span>
-          <span className={cn('text-sm font-medium whitespace-nowrap',
-            mobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 transition-opacity duration-150')}>更多</span>
-        </button>
+        {/* collapsible "更多" — hidden while MORE is empty (legacy CRM pages are off-nav) */}
+        {MORE.length > 0 && (
+          <button
+            onClick={() => setMoreOpen((v) => !v)}
+            title="更多"
+            className="w-full flex items-center h-12 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <span className="w-16 flex-shrink-0 flex items-center justify-center">
+              <ChevronDown size={18} className={cn('transition-transform', moreOpen ? '' : '-rotate-90')} />
+            </span>
+            <span className={cn('text-sm font-medium whitespace-nowrap',
+              mobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 transition-opacity duration-150')}>更多</span>
+          </button>
+        )}
         {moreOpen && MORE.map((it) => renderItem(it, mobile))}
       </nav>
 

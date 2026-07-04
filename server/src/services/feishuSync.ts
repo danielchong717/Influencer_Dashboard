@@ -83,13 +83,23 @@ async function fetchSharedUrls(token: string, ids: string[], base: string = BITA
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
     const url = `${BASE}/open-apis/bitable/v1/apps/${base}/tables/${table}/records/batch_get`;
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ record_ids: chunk, with_shared_url: true }),
-    });
-    const d: any = await r.json();
-    if (d.code !== 0) continue; // links are best-effort; never fail the whole sync over them
+    // steady-state fetches 0-1 chunks; a full backfill (first run / cache wipe) can be dozens —
+    // pace the chunks and retry once instead of silently skipping, so a rebuild at a few
+    // thousand rows doesn't trip Feishu QPS and leave blank links.
+    if (i > 0) await new Promise((res) => setTimeout(res, 300));
+    let d: any = null;
+    for (let attempt = 0; attempt < 2 && (!d || d.code !== 0); attempt++) {
+      if (attempt > 0) await new Promise((res) => setTimeout(res, 600));
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record_ids: chunk, with_shared_url: true }),
+        });
+        d = await r.json();
+      } catch { d = null; } // network blip → counts as a failed attempt
+    }
+    if (!d || d.code !== 0) continue; // still best-effort; never fail the whole sync over links
     for (const rec of d.data?.records || []) {
       if (rec.shared_url) out[rec.record_id] = rec.shared_url;
     }
@@ -293,6 +303,12 @@ function ensureFunnelTable() {
   if (!cols.includes('add_pay_raw')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN add_pay_raw TEXT`);
   // Phase 2: whether a human locked this row's 状态 (AI won't re-judge it upstream)
   if (!cols.includes('status_locked')) db.exec(`ALTER TABLE ig_funnel ADD COLUMN status_locked INTEGER DEFAULT 0`);
+  // scale: sync caches links by record_id and the API filters by restaurant on every request —
+  // without indexes both are full-table scans that grow linearly with the mirror.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_funnel_record ON ig_funnel(record_id);
+    CREATE INDEX IF NOT EXISTS idx_funnel_restaurant ON ig_funnel(restaurant);
+  `);
 }
 
 // Phase 2: local mirror of the Feishu "Issues" table (AI-raised conflicts). Read-only cache,
@@ -371,10 +387,19 @@ export function syncFromRecords(records: FeishuRecord[], emailEntries: FunnelEnt
   const withStatus = records.filter((r) => cellText(r.fields['状态']).trim()).length;
   const existing = (db.prepare(`SELECT COUNT(*) c FROM ig_funnel`).get() as any)?.c || 0;
   if (existing > 20 && withStatus < existing * 0.5) {
-    throw new Error(
-      `Aborting: only ${withStatus} rows have a 状态 but the mirror has ${existing} — upstream looks mid-edit. ` +
-      `Refusing to overwrite. Re-run once statuses are restored.`
-    );
+    if (process.env.ALLOW_SHRINK === '1') {
+      // intentional bulk cleanup (e.g. archiving an old cohort) — bypass ONCE, loudly.
+      console.warn(
+        `⚠️ [shrink-gate] BYPASSED via ALLOW_SHRINK=1: incoming ${withStatus} vs mirror ${existing}. ` +
+        `Mirror will shrink to match upstream. Unset ALLOW_SHRINK after this run.`
+      );
+    } else {
+      throw new Error(
+        `Aborting: only ${withStatus} rows have a 状态 but the mirror has ${existing} — upstream looks mid-edit. ` +
+        `Refusing to overwrite. Re-run once statuses are restored. ` +
+        `(故意大清理? 设 ALLOW_SHRINK=1 跑一次放行)`
+      );
+    }
   }
 
   const tx = db.transaction((rows: FeishuRecord[]) => {
@@ -708,5 +733,7 @@ export async function syncFromFeishu(): Promise<SyncResult> {
   const result = syncFromRecords(records, emailEntries);
   // Phase 2: refresh AI-raised issues — FAIL-OPEN, never let it break the main sync.
   try { await syncIssues(token); } catch (e) { console.error('[syncIssues] non-fatal:', e instanceof Error ? e.message : e); }
+  // full-table rewrites each sync balloon the WAL (seen 10× the db size); fold it back in.
+  try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* non-fatal */ }
   return result;
 }
