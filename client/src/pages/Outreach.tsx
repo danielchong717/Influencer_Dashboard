@@ -573,12 +573,10 @@ export default function Outreach() {
           {/* Funnel */}
           {records.length > 0 && (() => {
             const total = records.length;
-            const opened = totals.total_opened || 0;
             const replied = totals.total_replied || 0;
             const confirmed = totals.total_confirmed || 0;
             const funnelStages = [
               { label: 'Contacted', count: total, color: '#3b82f6' },
-              { label: 'Opened', count: opened, color: '#8b5cf6' },
               { label: 'Replied', count: replied, color: '#f59e0b' },
               { label: 'Confirmed', count: confirmed, color: '#10b981' },
             ];
