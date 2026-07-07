@@ -125,15 +125,22 @@ router.post('/send', (req, res) => {
 });
 
 router.put('/:id/status', (req, res) => {
-  const { status, influencer_id, campaign_id } = req.body;
+  const { status, influencer_id } = req.body;
+  let { campaign_id } = req.body;
   const now = new Date().toISOString();
   let outreachId = req.params.id;
+
+  // Fall back to first campaign if none provided
+  if (!campaign_id) {
+    const firstCampaign = db.prepare('SELECT id FROM campaigns LIMIT 1').get() as any;
+    campaign_id = firstCampaign?.id;
+  }
 
   // If no real outreach record exists yet (influencer added but no email sent),
   // create one on the fly so status changes and downstream automation work.
   if (outreachId === 'null' || outreachId === 'undefined' || !outreachId) {
-    const existing = influencer_id && campaign_id
-      ? db.prepare('SELECT id FROM outreach WHERE influencer_id = ? AND campaign_id = ?').get(influencer_id, campaign_id) as any
+    const existing = influencer_id
+      ? db.prepare('SELECT id FROM outreach WHERE influencer_id = ?').get(influencer_id) as any
       : null;
     if (existing) {
       outreachId = existing.id;
