@@ -300,7 +300,7 @@ export default function Outreach() {
 
   const handleStatusChange = async (id: string, status: string, influencerId: string, campaignId?: string) => {
     // Optimistic update so the dropdown reflects the change immediately
-    setRecords(prev => prev.map(r => r.influencer_id === influencerId ? { ...r, status } : r));
+    setRecords(prev => prev.map(r => r.influencer_id === influencerId ? { ...r, status: status as OutreachRecord['status'] } : r));
     try {
       const res = await updateOutreachStatus(id, status, influencerId, campaignId);
       if (res.data.pipeline_created) showToast('Confirmed — added to Pipeline & Content Schedule', 'success');
