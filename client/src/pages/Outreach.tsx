@@ -533,10 +533,10 @@ export default function Outreach() {
             const confirmed = totals.total_confirmed || 0;
             const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 100) : null;
             const funnelStages = [
-              { label: 'Added', value: `${total}`, count: total, color: '#6366f1', pct: null },
-              { label: 'Contacted', value: `${sent}`, count: sent, color: '#3b82f6', pct: pct(sent, total) },
-              { label: 'Replied', value: `${replied}`, count: replied, color: '#8b5cf6', pct: pct(replied, sent) },
-              { label: 'Confirmed', value: `${confirmed}`, count: confirmed, color: '#10b981', pct: pct(confirmed, replied || sent) },
+              { label: 'Contacted', value: `${sent}`, count: sent || total, color: '#3b82f6', pct: null },
+              { label: 'Opened', value: `${opened}`, count: opened, color: '#8b5cf6', pct: pct(opened, sent || total) },
+              { label: 'Replied', value: `${replied}`, count: replied, color: '#f59e0b', pct: pct(replied, opened || sent || total) },
+              { label: 'Confirmed', value: `${confirmed}`, count: confirmed, color: '#10b981', pct: pct(confirmed, replied || opened || sent || total) },
             ];
             return (
               <div className="card p-5">
