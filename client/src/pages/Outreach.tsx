@@ -13,6 +13,62 @@ import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
 
+function FunnelChart({ stages }: { stages: { label: string; value: string; count: number; color: string; pct: number | null }[] }) {
+  const W = 520;
+  const ROW_H = 64;
+  const GAP = 3;
+  const MAX_W = 440;
+  const MIN_W = 72;
+  const totalH = stages.length * (ROW_H + GAP);
+  const maxCount = stages[0]?.count || 1;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full max-w-lg mx-auto" role="img" aria-label="Outreach funnel">
+      <defs>
+        {stages.map((s, i) => (
+          <linearGradient key={i} id={`fg${i}`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={s.color} stopOpacity="0.75" />
+            <stop offset="50%" stopColor={s.color} stopOpacity="1" />
+            <stop offset="100%" stopColor={s.color} stopOpacity="0.75" />
+          </linearGradient>
+        ))}
+      </defs>
+      {stages.map((stage, i) => {
+        const thisW = Math.max(MIN_W, MAX_W * (stage.count / maxCount));
+        const nextCount = stages[i + 1]?.count ?? stage.count * 0.6;
+        const nextW = Math.max(MIN_W, MAX_W * (nextCount / maxCount));
+        const x = (W - thisW) / 2;
+        const nx = (W - nextW) / 2;
+        const y = i * (ROW_H + GAP);
+        const isLast = i === stages.length - 1;
+        const botW = isLast ? Math.max(MIN_W, thisW * 0.78) : nextW;
+        const botX = isLast ? (W - botW) / 2 : nx;
+        const pts = `${x},${y} ${x + thisW},${y} ${botX + botW},${y + ROW_H} ${botX},${y + ROW_H}`;
+
+        return (
+          <g key={stage.label}>
+            <polygon points={pts} fill={`url(#fg${i})`} rx="4" />
+            {/* subtle inner highlight */}
+            <polygon points={`${x + 6},${y + 4} ${x + thisW - 6},${y + 4} ${x + thisW - 6},${y + 14} ${x + 6},${y + 14}`}
+              fill="white" opacity="0.08" />
+            <text x={W / 2} y={y + ROW_H / 2 - 8} textAnchor="middle"
+              fill="white" fontSize="12.5" fontWeight="700" letterSpacing="0.3">
+              {stage.label}
+            </text>
+            <text x={W / 2} y={y + ROW_H / 2 + 10} textAnchor="middle"
+              fill="white" fontSize="13" fontWeight="600" opacity="0.92">
+              {stage.value}
+              {stage.pct !== null && (
+                <tspan fill="white" fontSize="11" opacity="0.7">  {stage.pct}%</tspan>
+              )}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 const PLATFORMS = ['TikTok', 'YouTube', 'Instagram', 'RedNote'];
 const BLANK_INF = { name: '', platform: 'Instagram', username: '', email: '', followers: '', avg_reel_views: '', category: '', country: '' };
 const STATUS_ORDER = ['pending', 'sent', 'opened', 'replied', 'confirmed'];
@@ -467,6 +523,37 @@ export default function Outreach() {
               </div>
             ))}
           </div>
+
+          {/* Funnel */}
+          {records.length > 0 && (() => {
+            const total = records.length;
+            const sent = totals.total_sent || 0;
+            const opened = totals.total_opened || 0;
+            const replied = totals.total_replied || 0;
+            const confirmed = totals.total_confirmed || 0;
+            const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 100) : null;
+            const funnelStages = [
+              { label: 'Added', value: `${total}`, count: total, color: '#6366f1', pct: null },
+              { label: 'Contacted', value: `${sent}`, count: sent, color: '#3b82f6', pct: pct(sent, total) },
+              { label: 'Replied', value: `${replied}`, count: replied, color: '#8b5cf6', pct: pct(replied, sent) },
+              { label: 'Confirmed', value: `${confirmed}`, count: confirmed, color: '#10b981', pct: pct(confirmed, replied || sent) },
+            ];
+            return (
+              <div className="card p-5">
+                <div className="text-sm font-semibold text-slate-700 mb-4">Outreach Funnel</div>
+                <FunnelChart stages={funnelStages} />
+                <div className="grid grid-cols-4 gap-2 mt-4 text-center text-xs text-slate-500">
+                  {funnelStages.map(s => (
+                    <div key={s.label}>
+                      <div className="font-semibold text-slate-800 text-base">{s.count}</div>
+                      <div>{s.label}</div>
+                      {s.pct !== null && <div className="text-slate-400">{s.pct}% conv.</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Team performance */}
           {members.length > 0 && (
