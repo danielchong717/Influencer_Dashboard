@@ -299,9 +299,16 @@ export default function Outreach() {
   };
 
   const handleStatusChange = async (id: string, status: string, influencerId: string, campaignId?: string) => {
-    const res = await updateOutreachStatus(id, status, influencerId, campaignId);
-    if (res.data.pipeline_created) showToast('Confirmed — added to Pipeline & Content Schedule', 'success');
-    load();
+    // Optimistic update so the dropdown reflects the change immediately
+    setRecords(prev => prev.map(r => r.influencer_id === influencerId ? { ...r, status } : r));
+    try {
+      const res = await updateOutreachStatus(id, status, influencerId, campaignId);
+      if (res.data.pipeline_created) showToast('Confirmed — added to Pipeline & Content Schedule', 'success');
+      load();
+    } catch {
+      showToast('Failed to update status', 'error');
+      load(); // revert to server state
+    }
   };
 
   // ── Template handlers ──
