@@ -13,55 +13,101 @@ import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
 
-function FunnelChart({ stages }: { stages: { label: string; value: string; count: number; color: string; pct: number | null }[] }) {
-  const W = 520;
-  const ROW_H = 64;
-  const GAP = 3;
-  const MAX_W = 440;
-  const MIN_W = 72;
-  const totalH = stages.length * (ROW_H + GAP);
+function Funnel3D({ stages }: { stages: { label: string; count: number; color: string }[] }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const W = 560;
+  const H_PER = 100;
+  const MAX_HALF = 210;
+  const MIN_HALF = 48;
+  const EY = 0.14;
+  const PAD = 20;
+  const cx = W / 2;
   const maxCount = stages[0]?.count || 1;
+  const hw = (n: number) => Math.max(MIN_HALF, MAX_HALF * (n / maxCount));
+  const totalH = PAD + stages.length * H_PER + 40;
 
   return (
-    <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full max-w-lg mx-auto" role="img" aria-label="Outreach funnel">
+    <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full max-w-xl mx-auto select-none">
       <defs>
         {stages.map((s, i) => (
-          <linearGradient key={i} id={`fg${i}`} x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor={s.color} stopOpacity="0.75" />
-            <stop offset="50%" stopColor={s.color} stopOpacity="1" />
-            <stop offset="100%" stopColor={s.color} stopOpacity="0.75" />
-          </linearGradient>
+          <React.Fragment key={i}>
+            <linearGradient id={`bd${i}`} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%"   stopColor={s.color} stopOpacity="0.5" />
+              <stop offset="38%"  stopColor={s.color} stopOpacity="1" />
+              <stop offset="100%" stopColor={s.color} stopOpacity="0.68" />
+            </linearGradient>
+            <radialGradient id={`tp${i}`} cx="50%" cy="35%" r="58%">
+              <stop offset="0%"   stopColor="white"   stopOpacity="0.42" />
+              <stop offset="100%" stopColor={s.color} stopOpacity="0.88" />
+            </radialGradient>
+          </React.Fragment>
         ))}
+        <filter id="fshadow" x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.22" />
+        </filter>
       </defs>
+
       {stages.map((stage, i) => {
-        const thisW = Math.max(MIN_W, MAX_W * (stage.count / maxCount));
-        const nextCount = stages[i + 1]?.count ?? stage.count * 0.6;
-        const nextW = Math.max(MIN_W, MAX_W * (nextCount / maxCount));
-        const x = (W - thisW) / 2;
-        const nx = (W - nextW) / 2;
-        const y = i * (ROW_H + GAP);
-        const isLast = i === stages.length - 1;
-        const botW = isLast ? Math.max(MIN_W, thisW * 0.78) : nextW;
-        const botX = isLast ? (W - botW) / 2 : nx;
-        const pts = `${x},${y} ${x + thisW},${y} ${botX + botW},${y + ROW_H} ${botX},${y + ROW_H}`;
+        const topY = PAD + i * H_PER;
+        const botY = topY + H_PER;
+        const hwT = hw(stage.count);
+        const hwB = i < stages.length - 1 ? hw(stages[i + 1].count) : Math.max(MIN_HALF, hwT * 0.6);
+        const ryT = hwT * EY;
+        const ryB = hwB * EY;
+        const active = hovered === i;
+        const prevCount = i > 0 ? stages[i - 1].count : stage.count;
+        const convPct = i > 0 && prevCount > 0
+          ? ((stage.count / prevCount) * 100).toFixed(1) + '%'
+          : null;
 
         return (
-          <g key={stage.label}>
-            <polygon points={pts} fill={`url(#fg${i})`} rx="4" />
-            {/* subtle inner highlight */}
-            <polygon points={`${x + 6},${y + 4} ${x + thisW - 6},${y + 4} ${x + thisW - 6},${y + 14} ${x + 6},${y + 14}`}
-              fill="white" opacity="0.08" />
-            <text x={W / 2} y={y + ROW_H / 2 - 8} textAnchor="middle"
-              fill="white" fontSize="12.5" fontWeight="700" letterSpacing="0.3">
-              {stage.label}
+          <g key={stage.label}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered(null)}
+            style={{ cursor: 'default', transition: 'opacity 0.15s' }}
+            opacity={hovered !== null && !active ? 0.55 : 1}
+            filter={active ? 'url(#fshadow)' : undefined}>
+
+            {/* Body trapezoid */}
+            <polygon
+              points={`${cx-hwT},${topY} ${cx+hwT},${topY} ${cx+hwB},${botY} ${cx-hwB},${botY}`}
+              fill={`url(#bd${i})`}
+            />
+
+            {/* Bottom ellipse for last stage (gives 3D cap feel) */}
+            {i === stages.length - 1 && (
+              <ellipse cx={cx} cy={botY} rx={hwB} ry={ryB}
+                fill={stage.color} opacity="0.38" />
+            )}
+
+            {/* Top ellipse (lit rim — the key 3D cue) */}
+            <ellipse cx={cx} cy={topY} rx={hwT} ry={ryT}
+              fill={`url(#tp${i})`} />
+
+            {/* Subtle glare streak on top ellipse */}
+            <ellipse cx={cx - hwT * 0.16} cy={topY} rx={hwT * 0.25} ry={ryT * 0.52}
+              fill="white" opacity={active ? 0.28 : 0.15} />
+
+            {/* Label */}
+            <text x={cx} y={topY + H_PER / 2 - 10} textAnchor="middle"
+              fill="white" fontSize="11" fontWeight="700" letterSpacing="0.8"
+              style={{ pointerEvents: 'none' }}>
+              {stage.label.toUpperCase()}
             </text>
-            <text x={W / 2} y={y + ROW_H / 2 + 10} textAnchor="middle"
-              fill="white" fontSize="13" fontWeight="600" opacity="0.92">
-              {stage.value}
-              {stage.pct !== null && (
-                <tspan fill="white" fontSize="11" opacity="0.7">  {stage.pct}%</tspan>
-              )}
+            {/* Count */}
+            <text x={cx} y={topY + H_PER / 2 + 14} textAnchor="middle"
+              fill="white" fontSize="24" fontWeight="800"
+              style={{ pointerEvents: 'none' }}>
+              {stage.count.toLocaleString()}
             </text>
+            {/* Conversion rate */}
+            {convPct && (
+              <text x={cx} y={topY + H_PER / 2 + 32} textAnchor="middle"
+                fill="white" fontSize="11" opacity="0.75"
+                style={{ pointerEvents: 'none' }}>
+                {convPct} conversion
+              </text>
+            )}
           </g>
         );
       })}
@@ -527,30 +573,20 @@ export default function Outreach() {
           {/* Funnel */}
           {records.length > 0 && (() => {
             const total = records.length;
-            const sent = totals.total_sent || 0;
             const opened = totals.total_opened || 0;
             const replied = totals.total_replied || 0;
             const confirmed = totals.total_confirmed || 0;
-            const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 100) : null;
             const funnelStages = [
-              { label: 'Contacted', value: `${sent}`, count: sent || total, color: '#3b82f6', pct: null },
-              { label: 'Opened', value: `${opened}`, count: opened, color: '#8b5cf6', pct: pct(opened, sent || total) },
-              { label: 'Replied', value: `${replied}`, count: replied, color: '#f59e0b', pct: pct(replied, opened || sent || total) },
-              { label: 'Confirmed', value: `${confirmed}`, count: confirmed, color: '#10b981', pct: pct(confirmed, replied || opened || sent || total) },
+              { label: 'Contacted', count: total, color: '#3b82f6' },
+              { label: 'Opened', count: opened, color: '#8b5cf6' },
+              { label: 'Replied', count: replied, color: '#f59e0b' },
+              { label: 'Confirmed', count: confirmed, color: '#10b981' },
             ];
             return (
               <div className="card p-5">
-                <div className="text-sm font-semibold text-slate-700 mb-4">Outreach Funnel</div>
-                <FunnelChart stages={funnelStages} />
-                <div className="grid grid-cols-4 gap-2 mt-4 text-center text-xs text-slate-500">
-                  {funnelStages.map(s => (
-                    <div key={s.label}>
-                      <div className="font-semibold text-slate-800 text-base">{s.count}</div>
-                      <div>{s.label}</div>
-                      {s.pct !== null && <div className="text-slate-400">{s.pct}% conv.</div>}
-                    </div>
-                  ))}
-                </div>
+                <div className="text-sm font-semibold text-slate-700 mb-1">Outreach Funnel</div>
+                <div className="text-xs text-slate-400 mb-4">Hover each stage for conversion rate</div>
+                <Funnel3D stages={funnelStages} />
               </div>
             );
           })()}
