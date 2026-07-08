@@ -32,7 +32,7 @@ router.get('/', (req, res) => {
 
   const rows = db.prepare(query).all(...params) as any[];
   // Fill in default status for influencers with no outreach record
-  const result = rows.map(r => ({ ...r, status: r.status || 'pending' }));
+  const result = rows.map(r => ({ ...r, status: r.status || 'added' }));
   res.json(result);
 });
 
@@ -147,7 +147,7 @@ router.put('/:id/status', (req, res) => {
     } else if (influencer_id && campaign_id) {
       const firstMember = db.prepare('SELECT id FROM team_members LIMIT 1').get() as any;
       outreachId = uuidv4();
-      db.prepare(`INSERT INTO outreach (id, influencer_id, campaign_id, team_member_id, status) VALUES (?, ?, ?, ?, 'pending')`)
+      db.prepare(`INSERT INTO outreach (id, influencer_id, campaign_id, team_member_id, status) VALUES (?, ?, ?, ?, 'added')`)
         .run(outreachId, influencer_id, campaign_id, firstMember?.id || '');
     }
   }

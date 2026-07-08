@@ -117,7 +117,7 @@ function Funnel3D({ stages }: { stages: { label: string; count: number; color: s
 
 const PLATFORMS = ['TikTok', 'YouTube', 'Instagram', 'RedNote'];
 const BLANK_INF = { name: '', platform: 'Instagram', username: '', email: '', followers: '', avg_reel_views: '', category: '', country: '' };
-const STATUS_ORDER = ['pending', 'sent', 'opened', 'replied', 'confirmed'];
+const STATUS_ORDER = ['added', 'pending', 'sent', 'opened', 'replied', 'confirmed'];
 const TEMPLATE_VARS = [
   { var: '{{name}}', desc: 'First name, or @username if no full name given' },
   { var: '{{username}}', desc: 'Handle without @' },

@@ -56,6 +56,7 @@ export function getPlatformIcon(platform: string): string {
 
 export function getStatusColor(status: string): string {
   const map: Record<string, string> = {
+    added: 'bg-gray-100 text-gray-500',
     pending: 'bg-slate-100 text-slate-600',
     sent: 'bg-blue-100 text-blue-700',
     opened: 'bg-yellow-100 text-yellow-700',

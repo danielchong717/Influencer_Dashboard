@@ -64,7 +64,7 @@ db.exec(`
     influencer_id TEXT NOT NULL,
     campaign_id TEXT NOT NULL,
     team_member_id TEXT NOT NULL,
-    status TEXT DEFAULT 'pending',
+    status TEXT DEFAULT 'added',
     email_template_id TEXT,
     sent_at TEXT,
     opened_at TEXT,
