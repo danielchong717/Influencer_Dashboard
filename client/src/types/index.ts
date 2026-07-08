@@ -42,7 +42,7 @@ export interface OutreachRecord {
   influencer_id: string;
   campaign_id: string;
   team_member_id: string;
-  status: 'added' | 'pending' | 'sent' | 'opened' | 'replied' | 'confirmed';
+  status: 'added' | 'pending' | 'sent' | 'opened' | 'seen' | 'replied' | 'negotiating' | 'confirmed' | 'posted' | 'paid';
   email_template_id?: string;
   sent_at?: string;
   opened_at?: string;

@@ -13,18 +13,19 @@ import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
 
-function Funnel3D({ stages }: { stages: { label: string; count: number; color: string }[] }) {
+function Funnel3D({ stages }: { stages: { label: string; count: number; reach: number; color: string }[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const W = 560;
-  const H_PER = 100;
+  const H_PER = 76;
   const MAX_HALF = 210;
-  const MIN_HALF = 48;
+  const MIN_HALF = 40;
   const EY = 0.14;
   const PAD = 20;
   const cx = W / 2;
   const maxCount = stages[0]?.count || 1;
   const hw = (n: number) => Math.max(MIN_HALF, MAX_HALF * (n / maxCount));
   const totalH = PAD + stages.length * H_PER + 40;
+  const fmtReach = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}K` : `${n}`;
 
   return (
     <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full max-w-xl mx-auto select-none">
@@ -89,25 +90,23 @@ function Funnel3D({ stages }: { stages: { label: string; count: number; color: s
               fill="white" opacity={active ? 0.28 : 0.15} />
 
             {/* Label */}
-            <text x={cx} y={topY + H_PER / 2 - 10} textAnchor="middle"
-              fill="white" fontSize="11" fontWeight="700" letterSpacing="0.8"
+            <text x={cx} y={topY + H_PER / 2 - 13} textAnchor="middle"
+              fill="white" fontSize="10" fontWeight="700" letterSpacing="0.8"
               style={{ pointerEvents: 'none' }}>
               {stage.label.toUpperCase()}
             </text>
             {/* Count */}
-            <text x={cx} y={topY + H_PER / 2 + 14} textAnchor="middle"
-              fill="white" fontSize="24" fontWeight="800"
+            <text x={cx} y={topY + H_PER / 2 + 7} textAnchor="middle"
+              fill="white" fontSize="20" fontWeight="800"
               style={{ pointerEvents: 'none' }}>
               {stage.count.toLocaleString()}
             </text>
-            {/* Conversion rate */}
-            {convPct && (
-              <text x={cx} y={topY + H_PER / 2 + 32} textAnchor="middle"
-                fill="white" fontSize="11" opacity="0.75"
-                style={{ pointerEvents: 'none' }}>
-                {convPct} conversion
-              </text>
-            )}
+            {/* Reach (default) or conversion rate (on hover) */}
+            <text x={cx} y={topY + H_PER / 2 + 24} textAnchor="middle"
+              fill="white" fontSize="10.5" opacity="0.78"
+              style={{ pointerEvents: 'none' }}>
+              {active && convPct ? `${convPct} conv.` : `${fmtReach(stage.reach)} reach`}
+            </text>
           </g>
         );
       })}
@@ -117,7 +116,12 @@ function Funnel3D({ stages }: { stages: { label: string; count: number; color: s
 
 const PLATFORMS = ['TikTok', 'YouTube', 'Instagram', 'RedNote'];
 const BLANK_INF = { name: '', platform: 'Instagram', username: '', email: '', followers: '', avg_reel_views: '', category: '', country: '' };
-const STATUS_ORDER = ['added', 'pending', 'sent', 'opened', 'replied', 'confirmed'];
+const STATUS_ORDER = ['added', 'pending', 'sent', 'seen', 'replied', 'negotiating', 'confirmed', 'posted', 'paid'];
+const STATUS_LABEL: Record<string, string> = {
+  added: 'Added', pending: 'Pending', sent: 'DM Sent', seen: 'Seen',
+  replied: 'Replied', negotiating: 'Negotiating', confirmed: 'Confirmed',
+  posted: 'Posted', paid: 'Paid',
+};
 const TEMPLATE_VARS = [
   { var: '{{name}}', desc: 'First name, or @username if no full name given' },
   { var: '{{username}}', desc: 'Handle without @' },
@@ -572,18 +576,26 @@ export default function Outreach() {
 
           {/* Funnel */}
           {records.length > 0 && (() => {
-            const total = records.length;
-            const replied = totals.total_replied || 0;
-            const confirmed = totals.total_confirmed || 0;
+            // Treat legacy 'opened' as equivalent to 'seen' for index purposes
+            const ALL_ST = ['added', 'pending', 'sent', 'opened', 'seen', 'replied', 'negotiating', 'confirmed', 'posted', 'paid'];
+            const norm = (s: string) => s === 'opened' ? 'seen' : s;
+            const idxOf = (s: string) => { const i = ALL_ST.indexOf(norm(s)); return i === -1 ? 0 : i; };
+            const countFrom = (s: string) => records.filter(r => idxOf(r.status) >= idxOf(s)).length;
+            const reachFrom = (s: string) => records.filter(r => idxOf(r.status) >= idxOf(s)).reduce((sum, r) => sum + (r.followers || 0), 0);
             const funnelStages = [
-              { label: 'Contacted', count: total, color: '#3b82f6' },
-              { label: 'Replied', count: replied, color: '#f59e0b' },
-              { label: 'Confirmed', count: confirmed, color: '#10b981' },
+              { label: 'Added',       count: countFrom('added'),       reach: reachFrom('added'),       color: '#6b7280' },
+              { label: 'DM Sent',     count: countFrom('sent'),        reach: reachFrom('sent'),        color: '#3b82f6' },
+              { label: 'Seen',        count: countFrom('seen'),        reach: reachFrom('seen'),        color: '#6366f1' },
+              { label: 'Replied',     count: countFrom('replied'),     reach: reachFrom('replied'),     color: '#8b5cf6' },
+              { label: 'Negotiating', count: countFrom('negotiating'), reach: reachFrom('negotiating'), color: '#f59e0b' },
+              { label: 'Confirmed',   count: countFrom('confirmed'),   reach: reachFrom('confirmed'),   color: '#10b981' },
+              { label: 'Posted',      count: countFrom('posted'),      reach: reachFrom('posted'),      color: '#14b8a6' },
+              { label: 'Paid',        count: countFrom('paid'),        reach: reachFrom('paid'),        color: '#22c55e' },
             ];
             return (
               <div className="card p-5">
                 <div className="text-sm font-semibold text-slate-700 mb-1">Outreach Funnel</div>
-                <div className="text-xs text-slate-400 mb-4">Hover each stage for conversion rate</div>
+                <div className="text-xs text-slate-400 mb-4">Hover a stage to see conversion rate · reach = total followers</div>
                 <Funnel3D stages={funnelStages} />
               </div>
             );
@@ -643,7 +655,7 @@ export default function Outreach() {
               <div className="flex items-center gap-2">
                 <select className="select text-xs py-1.5 w-32" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
                   <option value="">All Status</option>
-                  {STATUS_ORDER.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                  {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
                 </select>
                 <select className="select text-xs py-1.5 w-36" value={filterMember} onChange={e => setFilterMember(e.target.value)}>
                   <option value="">All Members</option>
@@ -706,7 +718,7 @@ export default function Outreach() {
                       <select value={r.status}
                         onChange={e => handleStatusChange(r.id, e.target.value, r.influencer_id, activeCampaign?.id)}
                         className={`badge border-0 cursor-pointer text-xs font-medium ${getStatusColor(r.status)}`}>
-                        {STATUS_ORDER.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                        {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
                       </select>
                     </td>
                     <td className="table-cell text-slate-500">{r.team_member_name}</td>
