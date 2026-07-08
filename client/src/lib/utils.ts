@@ -66,7 +66,6 @@ export function getStatusColor(status: string): string {
     confirmed: 'bg-green-100 text-green-700',
     posted: 'bg-teal-100 text-teal-700',
     paid: 'bg-emerald-100 text-emerald-700',
-    paid: 'bg-green-100 text-green-700',
     active: 'bg-green-100 text-green-700',
     completed: 'bg-slate-100 text-slate-600',
     paused: 'bg-yellow-100 text-yellow-700',
