@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import FunnelCanvas from '../components/FunnelCanvas';
 import {
   Send, RefreshCw, MessageSquare, Check, X, Clock, Plus, Pencil, Trash2,
   Copy, CheckCheck, ExternalLink, Search, FileText, Filter,
@@ -13,106 +14,6 @@ import { useAppStore } from '../store';
 import { formatNumber, formatDate, getPlatformColor, getStatusColor, getPlatformIcon } from '../lib/utils';
 import type { OutreachRecord } from '../types';
 
-function Funnel3D({ stages }: { stages: { label: string; count: number; reach: number; color: string }[] }) {
-  const [hovered, setHovered] = useState<number | null>(null);
-  const W = 560;
-  const H_PER = 76;
-  const MAX_HALF = 210;
-  const MIN_HALF = 40;
-  const EY = 0.14;
-  const PAD = 20;
-  const cx = W / 2;
-  const maxCount = stages[0]?.count || 1;
-  const hw = (n: number) => Math.max(MIN_HALF, MAX_HALF * (n / maxCount));
-  const totalH = PAD + stages.length * H_PER + 40;
-  const fmtReach = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}K` : `${n}`;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full max-w-xl mx-auto select-none">
-      <defs>
-        {stages.map((s, i) => (
-          <React.Fragment key={i}>
-            <linearGradient id={`bd${i}`} x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%"   stopColor={s.color} stopOpacity="0.5" />
-              <stop offset="38%"  stopColor={s.color} stopOpacity="1" />
-              <stop offset="100%" stopColor={s.color} stopOpacity="0.68" />
-            </linearGradient>
-            <radialGradient id={`tp${i}`} cx="50%" cy="35%" r="58%">
-              <stop offset="0%"   stopColor="white"   stopOpacity="0.42" />
-              <stop offset="100%" stopColor={s.color} stopOpacity="0.88" />
-            </radialGradient>
-          </React.Fragment>
-        ))}
-        <filter id="fshadow" x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.22" />
-        </filter>
-      </defs>
-
-      {stages.map((stage, i) => {
-        const topY = PAD + i * H_PER;
-        const botY = topY + H_PER;
-        const hwT = hw(stage.count);
-        const hwB = i < stages.length - 1 ? hw(stages[i + 1].count) : Math.max(MIN_HALF, hwT * 0.6);
-        const ryT = hwT * EY;
-        const ryB = hwB * EY;
-        const active = hovered === i;
-        const prevCount = i > 0 ? stages[i - 1].count : stage.count;
-        const convPct = i > 0 && prevCount > 0
-          ? ((stage.count / prevCount) * 100).toFixed(1) + '%'
-          : null;
-
-        return (
-          <g key={stage.label}
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered(null)}
-            style={{ cursor: 'default', transition: 'opacity 0.15s' }}
-            opacity={hovered !== null && !active ? 0.55 : 1}
-            filter={active ? 'url(#fshadow)' : undefined}>
-
-            {/* Body trapezoid */}
-            <polygon
-              points={`${cx-hwT},${topY} ${cx+hwT},${topY} ${cx+hwB},${botY} ${cx-hwB},${botY}`}
-              fill={`url(#bd${i})`}
-            />
-
-            {/* Bottom ellipse for last stage (gives 3D cap feel) */}
-            {i === stages.length - 1 && (
-              <ellipse cx={cx} cy={botY} rx={hwB} ry={ryB}
-                fill={stage.color} opacity="0.38" />
-            )}
-
-            {/* Top ellipse (lit rim — the key 3D cue) */}
-            <ellipse cx={cx} cy={topY} rx={hwT} ry={ryT}
-              fill={`url(#tp${i})`} />
-
-            {/* Subtle glare streak on top ellipse */}
-            <ellipse cx={cx - hwT * 0.16} cy={topY} rx={hwT * 0.25} ry={ryT * 0.52}
-              fill="white" opacity={active ? 0.28 : 0.15} />
-
-            {/* Label */}
-            <text x={cx} y={topY + H_PER / 2 - 13} textAnchor="middle"
-              fill="white" fontSize="10" fontWeight="700" letterSpacing="0.8"
-              style={{ pointerEvents: 'none' }}>
-              {stage.label.toUpperCase()}
-            </text>
-            {/* Count */}
-            <text x={cx} y={topY + H_PER / 2 + 7} textAnchor="middle"
-              fill="white" fontSize="20" fontWeight="800"
-              style={{ pointerEvents: 'none' }}>
-              {stage.count.toLocaleString()}
-            </text>
-            {/* Reach (default) or conversion rate (on hover) */}
-            <text x={cx} y={topY + H_PER / 2 + 24} textAnchor="middle"
-              fill="white" fontSize="10.5" opacity="0.78"
-              style={{ pointerEvents: 'none' }}>
-              {active && convPct ? `${convPct} conv.` : `${fmtReach(stage.reach)} reach`}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
 
 const PLATFORMS = ['TikTok', 'YouTube', 'Instagram', 'RedNote'];
 const BLANK_INF = { name: '', platform: 'Instagram', username: '', email: '', followers: '', avg_reel_views: '', category: '', country: '' };
@@ -596,7 +497,7 @@ export default function Outreach() {
               <div className="card p-5">
                 <div className="text-sm font-semibold text-slate-700 mb-1">Outreach Funnel</div>
                 <div className="text-xs text-slate-400 mb-4">Hover a stage to see conversion rate · reach = total followers</div>
-                <Funnel3D stages={funnelStages} />
+                <FunnelCanvas stages={funnelStages} />
               </div>
             );
           })()}
