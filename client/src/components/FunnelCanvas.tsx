@@ -25,8 +25,10 @@ export default function FunnelCanvas({ stages }: { stages: Stage[] }) {
     const scene = new THREE.Scene();
 
     // ── Camera ─────────────────────────────────────────────────────────────
-    const camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100);
-    camera.position.set(3.5, 1.5, 11);
+    // FOV 48 + position (5, 3, 15) gives a classic 3/4 elevated side view:
+    // all 8 stages visible, top ellipse shows depth, not looking straight down.
+    const camera = new THREE.PerspectiveCamera(48, W / H, 0.1, 100);
+    camera.position.set(5, 3, 15);
     camera.lookAt(0, 0, 0);
 
     // ── Renderer ───────────────────────────────────────────────────────────
