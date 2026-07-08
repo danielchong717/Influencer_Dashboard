@@ -429,7 +429,13 @@ export default function Outreach() {
   // ── Derived ──
   const members = analytics?.by_member || [];
   const totals = analytics?.totals || {};
-  const responseRate = totals.total_sent > 0 ? ((totals.total_replied / totals.total_sent) * 100).toFixed(0) : 0;
+  const RATE_STATUSES = ['added', 'pending', 'sent', 'opened', 'seen', 'replied', 'negotiating', 'confirmed', 'posted', 'paid'];
+  const repliedIdx = RATE_STATUSES.indexOf('replied');
+  const repliedOrBeyond = records.filter(r => {
+    const s = r.status === 'opened' ? 'seen' : r.status;
+    return RATE_STATUSES.indexOf(s) >= repliedIdx;
+  }).length;
+  const responseRate = records.length > 0 ? ((repliedOrBeyond / records.length) * 100).toFixed(0) : 0;
   const selectedTemplate = templates.find(t => t.id === sendForm.template_id);
 
   const tabCls = (tab: 'outreach' | 'discover') =>
