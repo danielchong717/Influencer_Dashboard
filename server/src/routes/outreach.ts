@@ -195,7 +195,7 @@ router.put('/:id/status', (req, res) => {
     }
   }
 
-  res.json({ success: true, pipeline_created });
+  res.json({ success: true, pipeline_created, outreach_id: outreachId });
 });
 
 router.post('/:id/follow-up', (req, res) => {

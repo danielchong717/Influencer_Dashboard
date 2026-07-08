@@ -306,15 +306,20 @@ export default function Outreach() {
   };
 
   const handleStatusChange = async (id: string, status: string, influencerId: string, campaignId?: string) => {
-    // Optimistic update so the dropdown reflects the change immediately
+    const prevStatus = records.find(r => r.influencer_id === influencerId)?.status;
+    // Optimistic update — reflect change immediately without waiting for server
     setRecords(prev => prev.map(r => r.influencer_id === influencerId ? { ...r, status: status as OutreachRecord['status'] } : r));
     try {
       const res = await updateOutreachStatus(id, status, influencerId, campaignId);
+      // Patch the record's outreach ID in place so subsequent changes use the real UUID
+      if (res.data.outreach_id) {
+        setRecords(prev => prev.map(r => r.influencer_id === influencerId ? { ...r, id: res.data.outreach_id } : r));
+      }
       if (res.data.pipeline_created) showToast('Confirmed — added to Pipeline & Content Schedule', 'success');
-      load();
     } catch {
       showToast('Failed to update status', 'error');
-      load(); // revert to server state
+      // Revert optimistic update — no full reload needed
+      setRecords(prev => prev.map(r => r.influencer_id === influencerId ? { ...r, status: prevStatus as OutreachRecord['status'] } : r));
     }
   };
 
