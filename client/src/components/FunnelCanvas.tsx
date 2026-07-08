@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
 
 interface Stage {
   label: string;
@@ -45,14 +45,15 @@ export default function FunnelCanvas({ stages }: { stages: Stage[] }) {
     fill.position.set(-5, -4, -4);
     scene.add(fill);
 
-    // ── OrbitControls ──────────────────────────────────────────────────────
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.06;
-    controls.enablePan = false;
+    // ── TrackballControls — full 3D rotation like Blender ─────────────────
+    const controls = new TrackballControls(camera, renderer.domElement);
+    controls.rotateSpeed = 2.5;
+    controls.zoomSpeed = 1.2;
+    controls.panSpeed = 0.8;
+    controls.noPan = true;
     controls.minDistance = 5;
     controls.maxDistance = 22;
-    controls.target.set(0, 0, 0);
+    controls.dynamicDampingFactor = 0.18;
 
     // ── Funnel geometry ────────────────────────────────────────────────────
     const maxCount = stages[0].count || 1;
