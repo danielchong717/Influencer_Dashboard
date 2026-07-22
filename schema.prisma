@@ -22,10 +22,9 @@ model SocialAccount {
   platform     Platform
   handle       String
   externalId   String?
-  influencerId String
+  influencerId String?          // was: String
   snapshots    MetricSnapshot[]
-  influencer   Influencer       @relation(fields: [influencerId], references: [id])
-
+  influencer   Influencer?      @relation(fields: [influencerId], references: [id])  // was: Influencer
   @@unique([platform, handle])
 }
 
@@ -35,9 +34,9 @@ model MetricSnapshot {
   followerCount  Int
   postCount      Int?
   engagementRate Float?
+  views          Int?          // new
   capturedAt     DateTime      @default(now())
   account        SocialAccount @relation(fields: [accountId], references: [id])
-
   @@index([accountId, capturedAt])
 }
 
