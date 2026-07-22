@@ -1,6 +1,6 @@
 import { ApolloServer } from "@apollo/server";
 import { startStandaloneServer } from "@apollo/server/standalone";
-import { PrismaClient, OutreachStatus } from "@prisma/client";
+import { PrismaClient, PipelineStage, ProductionStage } from "@prisma/client";
 import { DateTimeResolver } from "graphql-scalars";
 
 const prisma = new PrismaClient();
@@ -12,8 +12,12 @@ const typeDefs = `
         INSTAGRAM TIKTOK YOUTUBE TWITTER
     }
 
-    enum OutreachStatus {
-        ADDED PENDING DM_SENT SEEN REPLIED NEGOTIATING
+    enum PipelineStage {
+        ADDED PENDING DM_SENT SEEN REPLIED NEGOTIATING CONFIRMED POSTED PAID
+    }
+
+    enum ProductionStage {
+        WAITING_FOR_BRIEF BRIEF_SENT GIVING_FEEDBACK CREATING_VIDEO
     }
 
     enum PaymentStatus {
@@ -24,7 +28,7 @@ const typeDefs = `
         id: ID!
         name: String!
         createdAt: DateTime!
-        status: OutreachStatus!
+        status: PipelineStage!
         accounts: [SocialAccount!]!
         deals: [Deal!]!
     }
@@ -57,6 +61,9 @@ const typeDefs = `
         amount: Float!
         currency: String!
         paymentStatus: PaymentStatus!
+        productionStage: ProductionStage
+        visitDate: DateTime
+        dueDate: DateTime
         notes: String
         createdAt: DateTime!
     }
@@ -70,8 +77,9 @@ const typeDefs = `
 
     type Mutation {
         createInfluencer(name: String!): Influencer!
-        updateInfluencer(id: ID!, name: String, status: OutreachStatus): Influencer!
-        deleteInfluencer(id: ID!): Influencer! 
+        updateInfluencer(id: ID!, name: String, status: PipelineStage): Influencer!
+        deleteInfluencer(id: ID!): Influencer!
+        updateDealStage(id: ID!, productionStage: ProductionStage!): Deal!
     }
 `;
 
@@ -96,7 +104,7 @@ const resolvers = {
             return prisma.influencer.create({ data: { name: args.name } });
         },
         // read is above
-        updateInfluencer: (_parent: unknown, args: { id: string, name?: string; status?: OutreachStatus })=> {
+        updateInfluencer: (_parent: unknown, args: { id: string, name?: string; status?: PipelineStage })=> {
             return prisma.influencer.update({
                 where: { id: args.id },
                 data: {
@@ -107,7 +115,13 @@ const resolvers = {
         },
         deleteInfluencer: (_parent: unknown, args: { id: string }) => {
             return prisma.influencer.delete({ where: { id: args.id }});
-        }
+        },
+        updateDealStage: (_parent: unknown, args: { id: string; productionStage: ProductionStage }) => {
+            return prisma.deal.update({
+                where: { id: args.id },
+                data: { productionStage: args.productionStage },
+            });
+        },
     },
     Influencer: {
         accounts: (parent: { id: string }) => {
