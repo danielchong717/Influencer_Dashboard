@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Influencer {
+  id        String          @id @default(cuid())
+  name      String
+  createdAt DateTime        @default(now())
+  status    OutreachStatus  @default(ADDED)
+  Deal      Deal[]
+  accounts  SocialAccount[]
+}
+
+model SocialAccount {
+  id           String           @id @default(cuid())
+  platform     Platform
+  handle       String
+  externalId   String?
+  influencerId String
+  snapshots    MetricSnapshot[]
+  influencer   Influencer       @relation(fields: [influencerId], references: [id])
+
+  @@unique([platform, handle])
+}
+
+model MetricSnapshot {
+  id             String        @id @default(cuid())
+  accountId      String
+  followerCount  Int
+  postCount      Int?
+  engagementRate Float?
+  capturedAt     DateTime      @default(now())
+  account        SocialAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, capturedAt])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model Deal {
+  id            String        @id
+  influencerId  String
+  amount        Decimal       @db.Decimal(10, 2)
+  currency      String        @default("USD")
+  paymentStatus PaymentStatus @default(UNPAID)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  Influencer    Influencer    @relation(fields: [influencerId], references: [id])
+
+  @@index([influencerId])
+}
+
+enum Platform {
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+  TWITTER
+}
+
+enum OutreachStatus {
+  ADDED
+  PENDING
+  DM_SENT
+  SEEN
+  REPLIED
+  NEGOTIATING
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+}
